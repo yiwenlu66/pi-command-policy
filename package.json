@@ -1,0 +1,20 @@
+{
+  "name": "pi-rm-guard",
+  "version": "0.1.0",
+  "description": "PATH-level rm confirmation guard for Pi coding agents",
+  "license": "MIT",
+  "keywords": ["pi-package"],
+  "scripts": {
+    "test": "./tests/run.sh"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "pi": {
+    "extensions": ["./extensions"]
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yiwenlu66/pi-rm-guard.git"
+  }
+}
