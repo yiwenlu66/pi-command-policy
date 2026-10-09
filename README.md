@@ -8,7 +8,7 @@ reports that real path before anything is removed.
 ## Install
 
 ```sh
-pi install git:github.com/yiwenlu66/pi-rm-guard@v0.1.0
+pi install git:github.com/yiwenlu66/pi-rm-guard@v0.1.1
 ```
 
 Start a new Pi session after installation. Run `/rm-guard` to display the shim
@@ -17,8 +17,10 @@ directory and confirm that the extension is active.
 ## Mechanism
 
 ```text
-Pi bash tool
-    │ spawnHook prepends <package>/bin to PATH
+Pi bash tool call
+    │ rm-guard tool_call handler prepends: export PATH="<package>/bin:$PATH"
+    ▼
+active bash implementation (built-in, ShellGate, or another extension)
     ▼
 rm in a command, script, Makefile, or subshell
     ▼
@@ -28,8 +30,11 @@ rm in a command, script, Makefile, or subshell
 agent reviews report and chooses an explicit confirmation route
 ```
 
-The shim never reads stdin: Pi runs bash non-interactively, so an interactive
-prompt would hang rather than create a confirmation loop.
+The extension mutates the bash tool-call input rather than registering a bash
+tool, so it works alongside extensions that own bash (including ShellGate).
+The injection is idempotent: a command already containing the shim directory
+is left unchanged. The shim never reads stdin: Pi runs bash non-interactively,
+so an interactive prompt would hang rather than create a confirmation loop.
 
 For directory targets, the report includes an entry count (capped at 10,000)
 and an approximate `du -sh` size. A symlink is reported as the link itself,
@@ -57,6 +62,10 @@ intercept deletion APIs such as `unlink`, `find -delete`, or
 `shutil.rmtree`; explicit `/bin/rm` bypasses it by design. This is a guard
 against accidental deletion, not a security boundary against adversarial code.
 The agent retains normal filesystem access.
+
+The injected path is local to the machine that installed this package. If bash
+is routed to a remote host—for example, ShellGate SSH mode—the local shim path
+does not exist there and the guard is inactive for those commands.
 
 ## Development
 
