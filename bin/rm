@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# PATH-level guard for rm used by pi-rm-guard. It deliberately never reads stdin.
+
+if [[ ${RM_GUARD_CONFIRM:-} == 1 ]]; then
+	exec /bin/rm "$@"
+fi
+
+operands=()
+parsing_flags=1
+for argument in "$@"; do
+	if (( parsing_flags )); then
+		if [[ $argument == -- ]]; then
+			parsing_flags=0
+			continue
+		fi
+		if [[ $argument == -?* && $argument != - ]]; then
+			continue
+		fi
+	fi
+	operands+=("$argument")
+done
+
+# Delegate empty invocations so rm -f retains its successful no-op behavior.
+if (( ${#operands[@]} == 0 )); then
+	exec /bin/rm "$@"
+fi
+
+entry_limit=10000
+entry_count=0
+entry_overflow=0
+
+count_directory_entries() {
+	local directory=$1
+	local child
+	local -a children
+
+	children=("$directory"/*)
+	for child in "${children[@]}"; do
+		# With nullglob set, an empty directory contributes no literal glob.
+		[[ -e $child || -L $child ]] || continue
+		((entry_count += 1))
+		if (( entry_count > entry_limit )); then
+			entry_overflow=1
+			return
+		fi
+		# Do not traverse a symlinked directory: rm removes the link itself.
+		if [[ -d $child && ! -L $child ]]; then
+			count_directory_entries "$child"
+			(( entry_overflow )) && return
+		fi
+	done
+}
+
+report_directory_details() {
+	local directory=$1
+	local size
+
+	entry_count=0
+	entry_overflow=0
+	count_directory_entries "$directory"
+	if (( entry_overflow )); then
+		printf ', ≥%d entries' "$entry_limit"
+	else
+		printf ', %d entries' "$entry_count"
+	fi
+
+	# A slow or inaccessible filesystem must not make confirmation reporting hang.
+	if size=$(timeout 2s du -sh -- "$directory" 2>/dev/null); then
+		size=${size%%$'\t'*}
+		printf ', %s' "$size"
+	else
+		printf ', size unknown'
+	fi
+}
+
+shopt -s dotglob nullglob
+printf '%s\n' 'rm-guard: deletion blocked pending confirmation' >&2
+printf '%s\n' 'targets:' >&2
+
+for operand in "${operands[@]}"; do
+	# --no-symlinks preserves the final path component (and makes the report
+	# describe a symlink itself rather than the thing it points at).
+	target=$(realpath -m --no-symlinks -- "$operand")
+	if [[ -L $target ]]; then
+		printf '  - %s [symlink]\n' "$target" >&2
+	elif [[ -d $target ]]; then
+		printf '  - %s [dir' "$target" >&2
+		report_directory_details "$target" >&2
+		printf ']\n' >&2
+	elif [[ -e $target ]]; then
+		printf '  - %s [file]\n' "$target" >&2
+	else
+		printf '  - %s [missing]\n' "$target" >&2
+	fi
+done
+
+printf '%s\n' 'to confirm: re-run with /bin/rm (direct), or with RM_GUARD_CONFIRM=1 (covers rm inside scripts)' >&2
+exit 77
