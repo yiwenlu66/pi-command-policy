@@ -45,7 +45,7 @@ run_guarded() {
 	set -e
 }
 
-printf '1..27\n'
+printf '1..34\n'
 
 # 1. A normal recursive deletion is blocked and describes the absolute directory.
 protected_dir="$WORK/protected dir"
@@ -275,5 +275,70 @@ for search in ag ack; do
 	fi
 done
 pass 'search generator is reproducible and skips uninstalled tools'
+
+fake_ssh="$WORK/fake-ssh"
+cat >"$fake_ssh" <<'SSH'
+#!/usr/bin/env bash
+printf '%s\0' "$@" >"$FAKE_SSH_LOG"
+printf 'fake ssh ran\n'
+if [[ ${FAKE_SSH_READ:-} == 1 ]]; then cat; fi
+exit 23
+SSH
+chmod +x "$fake_ssh"
+
+check_ssh() {
+	local expected=$1
+	shift
+	run_guarded "$WORK/ssh.err" env PI_SHIMS_SSH_REAL="$fake_ssh" FAKE_SSH_LOG="$WORK/ssh.argv" ssh "$@"
+	assert_equals "$guard_status" 23 'ssh preserves the real command status'
+	printf '%s\0' "$@" >"$WORK/ssh.expected"
+	cmp -- "$WORK/ssh.expected" "$WORK/ssh.argv" || fail 'ssh forwards argv unchanged'
+	assert_contains "$WORK/stdout" 'fake ssh ran' 'ssh always runs the real command'
+	if [[ $expected == reminder ]]; then
+		assert_contains "$WORK/ssh.err" 'one-shot ssh' 'one-shot form prints a reminder'
+		assert_contains "$WORK/ssh.err" 'persistent SSH session inside tmux' 'reminder points to a persistent tmux session'
+		assert_equals "$(wc -l <"$WORK/ssh.err")" 1 'ssh reminder is one line'
+	else
+		[[ ! -s $WORK/ssh.err ]] || fail 'session/options form must be silent'
+	fi
+}
+
+check_ssh reminder remote-host 'printf "%s\n" "space in arg"'
+check_ssh reminder remote-host printf '%s\n' 'space in arg'
+pass 'ssh reminds on one-shots, runs anyway, and preserves argv/status/output'
+
+check_ssh silent remote-host
+check_ssh silent -q -t -N -vvv -Z remote-host
+check_ssh silent -V
+check_ssh silent
+pass 'ssh host-only sessions and operand-less flags are silent'
+
+for option in l p i F o J L R D W b c m O B E e S w Q P; do
+	check_ssh silent "-$option" 'value with spaces' remote-host
+	check_ssh reminder "-$option" 'value with spaces' remote-host uptime
+done
+pass 'ssh skips all supported option operands in session and one-shot forms'
+
+check_ssh silent -vvvp2222 -oBatchMode=yes -i/path/key remote-host
+check_ssh silent -vp 2222 -o BatchMode=yes remote-host
+check_ssh silent remote-host -p 2222
+check_ssh reminder -vvvp2222 -oBatchMode=yes remote-host uptime
+check_ssh reminder remote-host -p 2222 uptime
+pass 'ssh handles attached/clustered values and options after the host'
+
+check_ssh silent -- remote-host
+check_ssh reminder -- remote-host -command
+check_ssh reminder -o BatchMode=yes -- remote-host uptime
+pass 'ssh honors the option terminator without changing delegated arguments'
+
+printf 'ssh stdin untouched\n' | run_guarded "$WORK/ssh-stdin.err" env PI_SHIMS_SSH_REAL="$fake_ssh" FAKE_SSH_LOG="$WORK/ssh.argv" FAKE_SSH_READ=1 ssh remote-host uptime
+assert_contains "$WORK/stdout" 'ssh stdin untouched' 'ssh shim leaves stdin for the real command'
+pass 'ssh reminder never consumes stdin'
+
+run_guarded "$WORK/ssh-real.err" ssh -V
+assert_equals "$guard_status" 0 'default ssh executable runs without a connection'
+assert_contains "$WORK/ssh-real.err" 'OpenSSH' 'default ssh resolves the real system binary'
+if grep -F pi-shims "$WORK/ssh-real.err" >/dev/null; then fail 'ssh -V must not get a reminder'; fi
+pass 'default ssh path delegates silently to the real binary'
 
 printf '# %d tests passed\n' "$pass_count"

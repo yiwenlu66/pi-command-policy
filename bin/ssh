@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Remind, never refuse: one-shot ssh also bootstraps persistent sessions.
+# Parsing inspects argv only and never reads stdin.
+
+real_binary=${PI_SHIMS_SSH_REAL:-/usr/bin/ssh}
+positionals=0
+skip_next=0
+parsing_flags=1
+for argument in "$@"; do
+	if (( skip_next )); then
+		skip_next=0
+		continue
+	fi
+	if (( parsing_flags )); then
+		if [[ $argument == -- ]]; then
+			parsing_flags=0
+			continue
+		fi
+		if [[ $argument == -?* ]]; then
+			# Options may be clustered (-vp 22) or carry their value (-p22).
+			flags=${argument#-}
+			while [[ -n $flags ]]; do
+				flag=${flags:0:1}
+				flags=${flags:1}
+				case $flag in
+					l|p|i|F|o|J|L|R|D|W|b|c|m|O|B|E|e|S|w|Q|P)
+						[[ -n $flags ]] || skip_next=1
+						break
+						;;
+				esac
+			done
+			continue
+		fi
+	fi
+	((positionals += 1))
+done
+
+if (( positionals >= 2 )); then
+	printf '%s\n' 'pi-shims: one-shot ssh pays full connection setup and loses shell state; for repeated remote work, drive one persistent SSH session inside tmux (see the tmux skill).' >&2
+fi
+exec "$real_binary" "$@"

@@ -109,6 +109,26 @@ Each name is one `generate` line at the bottom of the generator; `ag` and `ack`
 are already listed and are emitted only when installed. Generated scripts are
 standalone; edit the generator and regenerate rather than editing each copy.
 
+## ssh — remind and run one-shot commands
+
+**Trigger:** after stripping SSH options and their operands, at least two
+positional arguments remain: a host plus a remote command. Host-only session
+forms are silent. Separate, attached, and clustered short options are supported,
+including `-p 22`, `-p22`, `-vp 22`, and `-oBatchMode=yes`; `--` ends option parsing.
+Unknown short flags are treated as operand-less.
+
+**Action:** print one stderr line explaining that one-shot SSH pays full
+connection setup and loses shell state; for repeated remote work, drive one
+persistent SSH session inside tmux (see the tmux skill). **Always run SSH**,
+including one-shots that bootstrap persistent sessions. Original arguments,
+stdin, stdout, and exit status are preserved.
+
+**Bypass:** `/usr/bin/ssh` skips the reminder. `PI_SHIMS_CONFIRM` affects refusing
+shims, so it does not suppress this non-blocking reminder. The real command
+normally is `/usr/bin/ssh`; `PI_SHIMS_SSH_REAL=/absolute/path/to/ssh` overrides it
+for testing or an alternate executable. Tests use a fake binary and never
+connect to a remote host.
+
 ## Coverage boundary
 
 Only commands resolved through **PATH** are intercepted, including child scripts,
@@ -143,3 +163,9 @@ Node.js with TypeScript stripping (22.18+), plus Pi's peer dependency installed.
 ```sh
 ./tests/run.sh
 ```
+
+The suite exercises rm regression and inherited bypasses; decimal/suffixed sleep
+totals and passthrough; real grep/rg FIFO timeouts with retained partial output,
+piped filters, and find/fd scans; real-binary resolution and generator output;
+and SSH argument detection, status/argv/stdin forwarding, and a local `ssh -V`.
+Timeouts are shortened for tests; no large search tree or remote host is needed.
