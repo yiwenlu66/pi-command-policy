@@ -1,77 +1,95 @@
-# pi-rm-guard
+# pi-shims
 
-`pi-rm-guard` is a Pi package that makes an agent confirm `rm` deletions after
-shell expansion. It targets accidents such as a misset variable in a script:
-when `rm -rf $TARGET` executes, the shim receives the expanded target and
-reports that real path before anything is removed.
+PATH-level shims that shape how Pi agents work. Each command has its own Bash
+script in `bin/`; the extension prepends that directory to every Pi bash tool
+call. Refusing interventions print to stderr and exit **77**. Shim logic never
+reads stdin or prompts interactively; delegated commands retain their normal I/O.
 
 ## Install
 
 ```sh
-pi install git:github.com/yiwenlu66/pi-rm-guard@v0.1.1
+pi install git:github.com/yiwenlu66/pi-shims@v0.2.0
 ```
 
-Start a new Pi session after installation. Run `/rm-guard` to display the shim
-directory and confirm that the extension is active.
+Start a new Pi session after installation. `/shims` reports the shim directory
+and lists the files currently present in `bin/`.
 
 ## Mechanism
 
 ```text
 Pi bash tool call
-    │ rm-guard tool_call handler prepends: export PATH="<package>/bin:$PATH"
+    │ shims tool_call handler prepends: export PATH="<package>/bin:$PATH"
     ▼
-active bash implementation (built-in, ShellGate, or another extension)
+active local bash implementation (built-in, ShellGate, or another extension)
     ▼
-rm in a command, script, Makefile, or subshell
+command in a script, Makefile, subshell, or direct invocation
     ▼
-<package>/bin/rm
-    │ reports post-expansion absolute targets and exits 77
-    ▼
-agent reviews report and chooses an explicit confirmation route
+<package>/bin/<command> receives shell-expanded argv
+    ├─ normal case / explicit bypass → exec real binary
+    └─ intervention → stderr guidance and exit 77
 ```
 
-The extension mutates the bash tool-call input rather than registering a bash
-tool, so it works alongside extensions that own bash (including ShellGate).
-The injection is idempotent: a command already containing the shim directory
-is left unchanged. The shim never reads stdin: Pi runs bash non-interactively,
-so an interactive prompt would hang rather than create a confirmation loop.
+The extension mutates bash tool-call input instead of registering a bash tool,
+so it composes with extensions that own bash. Injection is idempotent: commands
+already containing the shim directory are left unchanged.
 
-For directory targets, the report includes an entry count (capped at 10,000)
-and an approximate `du -sh` size. A symlink is reported as the link itself,
-not its referent.
-
-## Confirming an intended deletion
-
-A blocked command makes no filesystem change. Re-issue an intentional direct
-command with either route shown in the report:
+`PI_SHIMS_CONFIRM=1` is the global bypass for all refusing shims. Export it or
+prefix a script invocation to also cover child processes:
 
 ```sh
-/bin/rm -rf ./build             # direct, deliberate bypass
-RM_GUARD_CONFIRM=1 rm -rf ./build  # also reaches rm invoked inside scripts
+PI_SHIMS_CONFIRM=1 bash ./intentional-operation.sh
 ```
 
-`RM_GUARD_CONFIRM=1` is inherited by child processes, which lets an agent
-confirm an `rm` buried in a script without editing that script. `/bin/rm` is
-the deliberate direct-bypass channel.
+## rm — confirm expanded deletion targets
+
+**Trigger:** `rm` with at least one target, including inside scripts.
+
+**Action:** refuse before deletion and report post-expansion absolute paths,
+target type, directory entry counts (capped at 10,000), and approximate `du -sh`
+size. Symlinks are reported as links, not their referents. `rm -f` without targets
+retains its successful no-op behavior.
+
+**Bypass:** `/bin/rm`, `PI_SHIMS_CONFIRM=1`, or the legacy `RM_GUARD_CONFIRM=1`.
+The legacy variable confirms only rm, while the global variable covers every
+refusing shim.
+
+```sh
+/bin/rm -rf ./build
+PI_SHIMS_CONFIRM=1 rm -rf ./build
+RM_GUARD_CONFIRM=1 bash ./cleanup.sh
+```
 
 ## Coverage boundary
 
-This package intercepts commands that resolve `rm` through `PATH`, including
-scripts, Makefiles, and subshells launched from Pi's bash tool. It does **not**
-intercept deletion APIs such as `unlink`, `find -delete`, or
-`shutil.rmtree`; explicit `/bin/rm` bypasses it by design. This is a guard
-against accidental deletion, not a security boundary against adversarial code.
-The agent retains normal filesystem access.
+Only commands resolved through **PATH** are intercepted, including child scripts,
+Makefiles, and subshells that inherit it. Explicit absolute paths bypass shims;
+other binaries and APIs (such as `unlink`, `find -delete`, `shutil.rmtree`, and
+Pi's non-bash tools) are not intercepted. These are working-style nudges, not
+an access-control boundary; the agent retains normal filesystem access.
 
-The injected path is local to the machine that installed this package. If bash
-is routed to a remote host—for example, ShellGate SSH mode—the local shim path
-does not exist there and the guard is inactive for those commands.
+The injected directory is **local-machine only**. It does not exist on a remote
+host: when ShellGate routes bash over SSH, these shims are inactive there.
+
+## Migration from pi-rm-guard
+
+The package and slash command have a clean rename; there is no `/rm-guard` alias.
+Uninstall the old source and install the new pinned release:
+
+```sh
+pi remove git:github.com/yiwenlu66/pi-rm-guard@v0.1.1
+pi install git:github.com/yiwenlu66/pi-shims@v0.2.0
+```
+
+Use the exact old source shown by `pi list` if its ref differs. Start a new Pi
+session and use `/shims`. Existing `RM_GUARD_CONFIRM=1` cleanup scripts continue
+to work. For a live migration, verify the new install before deleting an old
+working clone.
 
 ## Development
+
+Requires Bash, GNU coreutils (`timeout`, `realpath`, `sleep`, `rm`), `du`, and
+Node.js with TypeScript stripping (22.18+), plus Pi's peer dependency installed.
 
 ```sh
 ./tests/run.sh
 ```
-
-The test suite covers normal and nested deletion attempts, direct and
-environment-confirmed bypasses, empty `rm -f`, symlinks, and unusual filenames.

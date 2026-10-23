@@ -45,7 +45,7 @@ run_guarded() {
 	set -e
 }
 
-printf '1..8\n'
+printf '1..10\n'
 
 # 1. A normal recursive deletion is blocked and describes the absolute directory.
 protected_dir="$WORK/protected dir"
@@ -125,5 +125,18 @@ assert_equals "$guard_status" 77 'rm -v -- leading-dash operand is blocked'
 assert_exists "$weird_dir/$leading_name" 'weird filename remains intact'
 assert_contains "$WORK/weird.err" "$weird_dir/$leading_name" 'report resolves spaced directory and leading-dash filename'
 pass 'options and weird filenames are handled without mutation'
+
+# Global confirmation also reaches rm inside scripts.
+global_dir="$WORK/global-confirmed"
+mkdir -p -- "$global_dir"
+printf 'rm -rf %q\n' "$global_dir" >"$WORK/global-confirm.sh"
+run_guarded "$WORK/global.err" env PI_SHIMS_CONFIRM=1 bash "$WORK/global-confirm.sh"
+assert_equals "$guard_status" 0 'global bypass allows nested rm'
+assert_missing "$global_dir" 'global bypass deletes through child shim'
+[[ ! -s $WORK/global.err ]] || fail 'global rm bypass is silent'
+pass 'PI_SHIMS_CONFIRM=1 confirms nested rm'
+
+node "$ROOT/tests/extension.mjs"
+pass 'extension prepends PATH and exposes only /shims with active files'
 
 printf '# %d tests passed\n' "$pass_count"

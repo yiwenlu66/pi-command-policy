@@ -1,3 +1,4 @@
+import { readdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isToolCallEventType, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -14,10 +15,12 @@ export default function (pi: ExtensionAPI) {
 		event.input.command = `${pathExport}${event.input.command}`;
 	});
 
-	pi.registerCommand("rm-guard", {
-		description: "Show rm-guard PATH interception status",
+	pi.registerCommand("shims", {
+		description: "Show pi-shims PATH interception status and active shims",
 		handler: async (_args, ctx) => {
-			ctx.ui.notify(`rm-guard active\nshim directory: ${shimDirectory}`, "info");
+			const entries = await readdir(shimDirectory, { withFileTypes: true });
+			const shims = entries.filter((entry) => entry.isFile()).map((entry) => entry.name).sort();
+			ctx.ui.notify(`pi-shims active\nshim directory: ${shimDirectory}\nshims: ${shims.join(", ") || "none"}`, "info");
 		},
 	});
 }

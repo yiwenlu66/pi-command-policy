@@ -1,7 +1,7 @@
 {
-  "name": "pi-rm-guard",
-  "version": "0.1.1",
-  "description": "PATH-level rm confirmation guard for Pi coding agents",
+  "name": "pi-shims",
+  "version": "0.2.0",
+  "description": "PATH-level shims that shape Pi agent working style: rm confirmation, long-sleep refusal, search timeouts, ssh one-shot reminders",
   "license": "MIT",
   "keywords": ["pi-package"],
   "scripts": {
@@ -15,6 +15,6 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/yiwenlu66/pi-rm-guard.git"
+    "url": "https://github.com/yiwenlu66/pi-shims.git"
   }
 }
