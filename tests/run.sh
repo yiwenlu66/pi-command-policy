@@ -48,7 +48,7 @@ run_guarded() {
 	set -e
 }
 
-printf '1..36\n'
+printf '1..37\n'
 
 # 1. A normal recursive deletion is blocked and describes the absolute directory.
 protected_dir="$WORK/protected dir"
@@ -367,5 +367,27 @@ printf '%s\n' -- 60s >"$WORK/timeout.expected"
 cmp -- "$WORK/timeout.expected" "$WORK/timeout.argv" || fail 'search must use timeout -- 60s by default'
 [[ ! -s $WORK/search-default.err ]] || fail 'normal search with default timeout is silent'
 pass 'filesystem search uses a 60s timeout by default'
+
+# Model package migration: identical copies, symlink aliases, and a different
+# pi-shims version all coexist before the real user-local binary in PATH.
+mkdir -p -- "$WORK/real-search-bin" "$WORK/copied/bin" "$WORK/older/bin"
+for search in ag ack; do
+	printf '#!/usr/bin/env bash\nprintf "fake %s version\\n"\n' "$search" >"$WORK/real-search-bin/$search"
+	chmod +x "$WORK/real-search-bin/$search"
+done
+PATH="$WORK/real-search-bin:$PATH" "$WORK/generator/scripts/generate-search-shims.sh" >"$WORK/generator-all.out"
+cp -- "$WORK/generator/bin/"* "$WORK/copied/bin/"
+cp -- "$WORK/generator/bin/"* "$WORK/older/bin/"
+printf '{"name":"pi-shims","version":"0.2.0"}\n' >"$WORK/older/package.json"
+for search in grep rg find fd ag ack; do
+	printf '\n# Different generated package version.\n' >>"$WORK/older/bin/$search"
+done
+ln -s -- "$WORK/copied/bin" "$WORK/copied-alias"
+for search in grep rg find fd ag ack; do
+	run_guarded "$WORK/search-copies.err" /usr/bin/timeout 1s env PATH="$WORK/generator/bin:$WORK/copied-alias:$WORK/copied/bin:$WORK/older/bin:$ROOT/bin:$WORK/real-search-bin:$PATH" "$WORK/generator/bin/$search" --version </dev/null
+	assert_equals "$guard_status" 0 "$search skips other installed shim copies and reaches the real binary"
+	[[ ! -s $WORK/search-copies.err ]] || fail "$search version probe with duplicate shims is silent"
+done
+pass 'all six search shims skip identical copies, symlink aliases, and other package versions'
 
 printf '# %d tests passed\n' "$pass_count"

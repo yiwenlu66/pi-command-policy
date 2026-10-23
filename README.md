@@ -8,7 +8,7 @@ reads stdin or prompts interactively; delegated commands retain their normal I/O
 ## Install
 
 ```sh
-pi install git:github.com/yiwenlu66/pi-shims@v0.2.0
+pi install git:github.com/yiwenlu66/pi-shims@v0.2.1
 ```
 
 Start a new Pi session after installation. `/shims` reports the shim directory
@@ -97,7 +97,10 @@ The shipped shims match tools installed on the development machine: `grep`,
 `/usr/bin/<name>`. If missing there, lookup walks PATH, skips the shim and
 same-file aliases, and resolves the real executable to an absolute path. This
 also supports a user-local `fd` without hardcoding a home directory. A missing
-real binary reports an error and exits 127; it cannot recurse into itself.
+real binary reports an error and exits 127. Symlinks are canonicalized before
+comparison; same-file aliases, identical generated copies (`cmp`), and binaries
+inside another pi-shims package's `bin/` are skipped. This also handles old and
+new installations coexisting during migration without shims executing each other.
 
 Regenerate for the installed tools with:
 
@@ -147,7 +150,7 @@ Uninstall the old source and install the new pinned release:
 
 ```sh
 pi remove git:github.com/yiwenlu66/pi-rm-guard@v0.1.1
-pi install git:github.com/yiwenlu66/pi-shims@v0.2.0
+pi install git:github.com/yiwenlu66/pi-shims@v0.2.1
 ```
 
 Use the exact old source shown by `pi list` if its ref differs. Start a new Pi
@@ -155,9 +158,13 @@ session and use `/shims`. Existing `RM_GUARD_CONFIRM=1` cleanup scripts continue
 to work. For a live migration, verify the new install before deleting an old
 working clone.
 
+Use v0.2.1 rather than v0.2.0: the patch prevents PATH recursion when separate
+copies of the search shims coexist. The v0.2.0 tag remains unchanged.
+
 ## Development
 
-Requires Bash, awk, GNU coreutils (`timeout`, `realpath`, `sleep`, `rm`), `du`, and
+Requires Bash, awk, `cmp` (diffutils), GNU coreutils (`timeout`, `realpath`,
+`sleep`, `rm`), `du`, and
 Node.js with TypeScript stripping (22.18+), plus Pi's peer dependency installed.
 
 ```sh
