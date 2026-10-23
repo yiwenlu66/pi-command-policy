@@ -8,7 +8,7 @@ reads stdin or prompts interactively; delegated commands retain their normal I/O
 ## Install
 
 ```sh
-pi install git:github.com/yiwenlu66/pi-shims@v0.2.1
+pi install git:github.com/yiwenlu66/pi-shims@v0.2.2
 ```
 
 Start a new Pi session after installation. `/shims` reports the shim directory
@@ -158,7 +158,7 @@ Uninstall the old source and install the new pinned release:
 
 ```sh
 pi remove git:github.com/yiwenlu66/pi-rm-guard@v0.1.1
-pi install git:github.com/yiwenlu66/pi-shims@v0.2.1
+pi install git:github.com/yiwenlu66/pi-shims@v0.2.2
 ```
 
 Use the exact old source shown by `pi list` if its ref differs. Start a new Pi
@@ -166,8 +166,9 @@ session and use `/shims`. Existing `RM_GUARD_CONFIRM=1` cleanup scripts continue
 to work. For a live migration, verify the new install before deleting an old
 working clone.
 
-Use v0.2.1 rather than v0.2.0: the patch prevents PATH recursion when separate
-copies of the search shims coexist. The v0.2.0 tag remains unchanged.
+v0.2.2 permits long sleeps in pi-notify detached workloads while retaining the
+v0.2.1 fix for PATH recursion when separate copies of the search shims coexist.
+Existing release tags remain unchanged.
 
 ## Development
 

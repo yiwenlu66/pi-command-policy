@@ -1,6 +1,6 @@
 {
   "name": "pi-shims",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "PATH-level shims that shape Pi agent working style: rm confirmation, long-sleep refusal, search timeouts, ssh one-shot reminders",
   "license": "MIT",
   "keywords": ["pi-package"],
