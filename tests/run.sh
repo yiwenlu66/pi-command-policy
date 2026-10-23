@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Exercise defaults regardless of bypass/override variables in the caller.
-unset PI_SHIMS_CONFIRM RM_GUARD_CONFIRM PI_SHIMS_SEARCH_TIMEOUT PI_SHIMS_SSH_REAL
+unset PI_SHIMS_CONFIRM RM_GUARD_CONFIRM PI_SHIMS_SEARCH_TIMEOUT PI_SHIMS_SSH_REAL PI_NOTIFY_BACKGROUND
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
 GUARD_PATH="$ROOT/bin:$PATH"
@@ -48,7 +48,7 @@ run_guarded() {
 	set -e
 }
 
-printf '1..37\n'
+printf '1..39\n'
 
 # 1. A normal recursive deletion is blocked and describes the absolute directory.
 protected_dir="$WORK/protected dir"
@@ -177,6 +177,16 @@ run_guarded "$WORK/sleep-bypass.err" timeout .1s env PI_SHIMS_CONFIRM=1 sleep 10
 assert_equals "$guard_status" 124 'global bypass actually waits until external timeout'
 [[ ! -s $WORK/sleep-bypass.err ]] || fail 'sleep global bypass is silent'
 pass 'PI_SHIMS_CONFIRM=1 bypasses long sleep refusal'
+
+run_guarded "$WORK/sleep-notify.err" timeout .05s env PI_NOTIFY_BACKGROUND=1 sleep 10
+assert_equals "$guard_status" 124 'notify background marker reaches the real timer'
+[[ ! -s $WORK/sleep-notify.err ]] || fail 'notify background sleep is silent'
+run_guarded "$WORK/sleep-notify-child.err" timeout .05s env PI_NOTIFY_BACKGROUND=1 bash -c 'sleep 10'
+assert_equals "$guard_status" 124 'notify background marker is inherited by child scripts'
+[[ ! -s $WORK/sleep-notify-child.err ]] || fail 'child notify background sleep is silent'
+run_guarded "$WORK/sleep-notify-value.err" env PI_NOTIFY_BACKGROUND=0 sleep 10
+assert_equals "$guard_status" 77 'only the exact marker value 1 exempts sleep'
+pass 'PI_NOTIFY_BACKGROUND=1 reaches the real sleep timer, including child scripts'
 
 run_guarded "$WORK/sleep-direct.err" timeout .1s /bin/sleep 10
 assert_equals "$guard_status" 124 'absolute sleep actually waits until external timeout'
@@ -343,6 +353,18 @@ assert_equals "$guard_status" 0 'default ssh executable runs without a connectio
 assert_contains "$WORK/ssh-real.err" 'OpenSSH' 'default ssh resolves the real system binary'
 if grep -F pi-shims "$WORK/ssh-real.err" >/dev/null; then fail 'ssh -V must not get a reminder'; fi
 pass 'default ssh path delegates silently to the real binary'
+
+notify_dir="$WORK/notify-marker-rm"
+mkdir -p -- "$notify_dir"
+run_guarded "$WORK/notify-rm.err" env PI_NOTIFY_BACKGROUND=1 rm -rf -- "$notify_dir"
+assert_equals "$guard_status" 77 'notify marker does not confirm rm'
+assert_exists "$notify_dir" 'notify marker leaves the rm target intact'
+run_guarded "$WORK/notify-find.err" env PI_NOTIFY_BACKGROUND=1 PI_SHIMS_SEARCH_TIMEOUT=.05s bash -c 'printf unused | find "$1" -print -exec /bin/sleep 1 \;' _ "$search_dir"
+assert_equals "$guard_status" 77 'notify marker does not lift the search timeout'
+run_guarded "$WORK/notify-ssh.err" env PI_NOTIFY_BACKGROUND=1 PI_SHIMS_SSH_REAL="$fake_ssh" FAKE_SSH_LOG="$WORK/ssh.argv" ssh remote-host uptime
+assert_equals "$guard_status" 23 'notify marker keeps ssh delegation and status'
+assert_contains "$WORK/notify-ssh.err" 'one-shot ssh' 'notify marker keeps the ssh reminder'
+pass 'PI_NOTIFY_BACKGROUND=1 leaves rm, search, and ssh guards unchanged'
 
 run_guarded "$WORK/sleep-below.err" timeout .05s sleep 9.999s
 assert_equals "$guard_status" 124 'sleep just below the threshold reaches the real timer'

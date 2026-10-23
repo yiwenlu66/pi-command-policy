@@ -73,6 +73,14 @@ Short sleeps execute silently.
 
 **Bypass:** `/bin/sleep` or `PI_SHIMS_CONFIRM=1` (inherited by child scripts).
 
+**Background workers:** `PI_NOTIFY_BACKGROUND=1` (exact value) marks a workload
+that is already running detached — set by `pi-notify run --detach` on the wrapped
+command and inherited by its descendants. A detached watcher's polling loop blocks
+no turn, so the shim passes those invocations to the real timer. The marker
+exempts only sleep; the rm, search, and ssh interventions are unaffected. It is a
+pi-notify contract, not an agent bypass: use `PI_SHIMS_CONFIRM=1` for deliberate
+foreground waits.
+
 ## grep, rg, find, fd — bound filesystem searches
 
 **Trigger:** a search runs longer than **60 seconds**. These shims run the real
@@ -172,9 +180,11 @@ Node.js with TypeScript stripping (22.18+), plus Pi's peer dependency installed.
 ```
 
 The suite exercises rm regression and inherited bypasses; decimal/suffixed sleep
-totals and passthrough; real grep/rg FIFO timeouts with retained partial output,
-piped filters, and find/fd scans; real-binary resolution and generator output;
-and SSH argument detection, status/argv/stdin forwarding, and a local `ssh -V`.
+totals and passthrough; the `PI_NOTIFY_BACKGROUND=1` detached-worker exemption and
+its isolation from the other guards; real grep/rg FIFO timeouts with retained
+partial output, piped filters, and find/fd scans; real-binary resolution and
+generator output; and SSH argument detection, status/argv/stdin forwarding, and a
+local `ssh -V`.
 The production 60s timeout argument is checked separately; timed tests use a
 short override, with no large search tree or remote host needed. The suite
 unsets inherited bypass/test overrides so it always exercises the defaults.

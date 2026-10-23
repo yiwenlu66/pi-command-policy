@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Refuse long turn-blocking waits. Never read stdin; let sleep validate syntax.
 
-if [[ ${PI_SHIMS_CONFIRM:-} == 1 ]]; then
+# A pi-notify detached watcher is already the background mechanism this shim
+# recommends; its polling loop is not blocking any turn. The marker is set by
+# pi-notify run --detach on the wrapped workload and inherited by descendants.
+if [[ ${PI_SHIMS_CONFIRM:-} == 1 || ${PI_NOTIFY_BACKGROUND:-} == 1 ]]; then
 	exec /bin/sleep "$@"
 fi
 
