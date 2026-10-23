@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Exercise defaults regardless of bypass/override variables in the caller.
+unset PI_SHIMS_CONFIRM RM_GUARD_CONFIRM PI_SHIMS_SEARCH_TIMEOUT PI_SHIMS_SSH_REAL
+
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
 GUARD_PATH="$ROOT/bin:$PATH"
 WORK="$ROOT/.test-tmp"
@@ -45,7 +48,7 @@ run_guarded() {
 	set -e
 }
 
-printf '1..34\n'
+printf '1..36\n'
 
 # 1. A normal recursive deletion is blocked and describes the absolute directory.
 protected_dir="$WORK/protected dir"
@@ -340,5 +343,29 @@ assert_equals "$guard_status" 0 'default ssh executable runs without a connectio
 assert_contains "$WORK/ssh-real.err" 'OpenSSH' 'default ssh resolves the real system binary'
 if grep -F pi-shims "$WORK/ssh-real.err" >/dev/null; then fail 'ssh -V must not get a reminder'; fi
 pass 'default ssh path delegates silently to the real binary'
+
+run_guarded "$WORK/sleep-below.err" timeout .05s sleep 9.999s
+assert_equals "$guard_status" 124 'sleep just below the threshold reaches the real timer'
+[[ ! -s $WORK/sleep-below.err ]] || fail 'sleep below threshold is silent'
+run_guarded "$WORK/sleep-child.err" timeout .05s env PI_SHIMS_CONFIRM=1 bash -c 'sleep 10'
+assert_equals "$guard_status" 124 'sleep global bypass is inherited by child scripts'
+[[ ! -s $WORK/sleep-child.err ]] || fail 'child sleep bypass is silent'
+pass 'sleep just below threshold passes and global bypass reaches child scripts'
+
+# Capture the timeout invocation without waiting for the production 60s limit.
+mkdir -p -- "$WORK/timeout-bin"
+cat >"$WORK/timeout-bin/timeout" <<'TIMEOUT'
+#!/usr/bin/env bash
+printf '%s\n' "$1" "$2" >"$FAKE_TIMEOUT_LOG"
+shift 2
+exec "$@"
+TIMEOUT
+chmod +x "$WORK/timeout-bin/timeout"
+run_guarded "$WORK/search-default.err" env PATH="$ROOT/bin:$WORK/timeout-bin:$PATH" FAKE_TIMEOUT_LOG="$WORK/timeout.argv" grep needle "$search_dir/one.txt" </dev/null
+assert_equals "$guard_status" 0 'default timed search delegates to the real grep'
+printf '%s\n' -- 60s >"$WORK/timeout.expected"
+cmp -- "$WORK/timeout.expected" "$WORK/timeout.argv" || fail 'search must use timeout -- 60s by default'
+[[ ! -s $WORK/search-default.err ]] || fail 'normal search with default timeout is silent'
+pass 'filesystem search uses a 60s timeout by default'
 
 printf '# %d tests passed\n' "$pass_count"

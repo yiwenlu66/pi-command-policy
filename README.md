@@ -168,4 +168,6 @@ The suite exercises rm regression and inherited bypasses; decimal/suffixed sleep
 totals and passthrough; real grep/rg FIFO timeouts with retained partial output,
 piped filters, and find/fd scans; real-binary resolution and generator output;
 and SSH argument detection, status/argv/stdin forwarding, and a local `ssh -V`.
-Timeouts are shortened for tests; no large search tree or remote host is needed.
+The production 60s timeout argument is checked separately; timed tests use a
+short override, with no large search tree or remote host needed. The suite
+unsets inherited bypass/test overrides so it always exercises the defaults.
