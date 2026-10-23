@@ -73,6 +73,42 @@ Short sleeps execute silently.
 
 **Bypass:** `/bin/sleep` or `PI_SHIMS_CONFIRM=1` (inherited by child scripts).
 
+## grep, rg, find, fd — bound filesystem searches
+
+**Trigger:** a search runs longer than **60 seconds**. These shims run the real
+binary under GNU `timeout 60s`. `grep`, `rg`, and generated `ag`/`ack` shims
+**exempt pipe stdin**: `tail -f log | grep pattern` is a deliberate unbounded
+streaming filter. The shim only checks `[ -p /dev/stdin ]`, without consuming it.
+`find` and `fd` have no stdin mode and are always timed.
+
+**Action:** timeout status 124 becomes exit 77. Partial output remains on stdout;
+the stderr report says the run was killed and its output is incomplete. Narrow
+the path, use `--include`/`--glob` or `-maxdepth`/`--max-depth` as appropriate,
+exclude `.git`/`node_modules`, and prefer `rg`/`fd` over `grep -R`/`find`.
+Normal exit codes and output are preserved.
+
+**Bypass:** `PI_SHIMS_CONFIRM=1` or the real binary's absolute path, which is
+included in the timeout report. `PI_SHIMS_SEARCH_TIMEOUT` overrides the duration
+for fast tests or a deliberate alternative limit (GNU timeout syntax, e.g.
+`.05s` or `2m`); the default remains `60s`.
+
+The shipped shims match tools installed on the development machine: `grep`,
+`rg`, `find`, and `fd`; `ag`/`ack` were absent. They prefer `/bin/grep` and
+`/usr/bin/<name>`. If missing there, lookup walks PATH, skips the shim and
+same-file aliases, and resolves the real executable to an absolute path. This
+also supports a user-local `fd` without hardcoding a home directory. A missing
+real binary reports an error and exits 127; it cannot recurse into itself.
+
+Regenerate for the installed tools with:
+
+```sh
+./scripts/generate-search-shims.sh
+```
+
+Each name is one `generate` line at the bottom of the generator; `ag` and `ack`
+are already listed and are emitted only when installed. Generated scripts are
+standalone; edit the generator and regenerate rather than editing each copy.
+
 ## Coverage boundary
 
 Only commands resolved through **PATH** are intercepted, including child scripts,

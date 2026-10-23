@@ -45,7 +45,7 @@ run_guarded() {
 	set -e
 }
 
-printf '1..17\n'
+printf '1..27\n'
 
 # 1. A normal recursive deletion is blocked and describes the absolute directory.
 protected_dir="$WORK/protected dir"
@@ -183,5 +183,97 @@ pass '/bin/sleep bypasses the shim'
 printf 'stdin untouched\n' | run_guarded "$WORK/sleep-stdin.err" bash -c 'sleep 10; status=$?; cat; exit "$status"'
 assert_contains "$WORK/stdout" 'stdin untouched' 'sleep refusal leaves stdin available to the caller'
 pass 'sleep shim never consumes caller stdin'
+
+# A named FIFO blocks the real grep/rg file scan without making stdin a pipe.
+run_fifo_search() {
+	local command=$1 confirmation=${2:-0}
+	local fifo="$WORK/search.fifo"
+	/bin/rm -f -- "$fifo"
+	mkfifo -- "$fifo"
+	(printf 'needle before timeout\n'; exec /bin/sleep .3) >"$fifo" &
+	local writer=$!
+	run_guarded "$WORK/search-timeout.err" env PI_SHIMS_SEARCH_TIMEOUT=.05s PI_SHIMS_CONFIRM="$confirmation" "$command" --line-buffered needle "$fifo" </dev/null
+	kill "$writer" 2>/dev/null || true
+	wait "$writer" 2>/dev/null || true
+}
+
+for search in grep rg; do
+	run_fifo_search "$search"
+	assert_equals "$guard_status" 77 "$search timeout becomes exit 77"
+	assert_contains "$WORK/stdout" 'needle before timeout' "$search preserves partial output"
+	assert_contains "$WORK/search-timeout.err" 'exceeded .05s and was killed' "$search reports the killed scan"
+	assert_contains "$WORK/search-timeout.err" 'partial output' "$search marks output incomplete"
+	assert_contains "$WORK/search-timeout.err" 'PI_SHIMS_CONFIRM=1' "$search explains the bypass"
+	pass "$search times out a filesystem search and preserves partial output"
+done
+
+for search in grep rg; do
+	run_guarded "$WORK/search-pipe.err" env PI_SHIMS_SEARCH_TIMEOUT=.01s bash -c '{ printf "needle first\n"; /bin/sleep .1; printf "needle last\n"; } | "$1" --line-buffered needle' _ "$search"
+	assert_equals "$guard_status" 0 "$search streaming filter runs longer than the timeout"
+	assert_contains "$WORK/stdout" 'needle first' "$search streams the first match"
+	assert_contains "$WORK/stdout" 'needle last' "$search streams after the deadline"
+	[[ ! -s $WORK/search-pipe.err ]] || fail "$search pipe exemption is silent"
+	pass "$search exempts pipe stdin from timing"
+done
+
+search_dir="$WORK/search-tree"
+mkdir -p -- "$search_dir"
+printf 'needle\n' >"$search_dir/one.txt"
+run_guarded "$WORK/find-timeout.err" env PI_SHIMS_SEARCH_TIMEOUT=.05s bash -c 'printf unused | find "$1" -print -exec /bin/sleep 1 \;' _ "$search_dir"
+assert_equals "$guard_status" 77 'find is timed even with pipe stdin'
+assert_contains "$WORK/stdout" "$search_dir" 'find retains partial paths'
+assert_contains "$WORK/find-timeout.err" 'was killed' 'find timeout is reported'
+pass 'find always times filesystem scans, including with pipe stdin'
+
+run_guarded "$WORK/fd-timeout.err" env PI_SHIMS_SEARCH_TIMEOUT=.05s bash -c 'printf unused | fd . "$1" --exec bash -c "exec /bin/sleep 1"' _ "$search_dir"
+assert_equals "$guard_status" 77 'fd is timed even with pipe stdin'
+assert_contains "$WORK/fd-timeout.err" 'was killed' 'fd timeout is reported'
+pass 'fd always times filesystem scans, including with pipe stdin'
+
+for search in grep rg; do
+	run_fifo_search "$search" 1
+	assert_equals "$guard_status" 0 "global bypass lets slow $search complete"
+	[[ ! -s $WORK/search-timeout.err ]] || fail "$search bypass is silent"
+done
+pass 'global confirmation runs slow searches untimed'
+
+run_guarded "$WORK/search-direct.err" env PI_SHIMS_SEARCH_TIMEOUT=.001s /bin/grep needle "$search_dir/one.txt"
+assert_equals "$guard_status" 0 'absolute grep bypass works'
+for search in grep rg; do
+	run_guarded "$WORK/search-normal.err" "$search" needle "$search_dir/one.txt" </dev/null
+	assert_equals "$guard_status" 0 "$search normal match succeeds"
+	assert_contains "$WORK/stdout" needle "$search preserves ordinary output"
+	[[ ! -s $WORK/search-normal.err ]] || fail "$search ordinary match is silent"
+	run_guarded "$WORK/search-no-match.err" "$search" absent "$search_dir/one.txt" </dev/null
+	assert_equals "$guard_status" 1 "$search no-match status is preserved"
+	run_guarded "$WORK/search-error.err" "$search" needle "$WORK/nonexistent" </dev/null
+	assert_equals "$guard_status" 2 "$search real errors are preserved"
+done
+pass 'searches preserve normal output, match/no-match/errors, and absolute bypass'
+
+# fd is user-local on this machine; exercise PATH fallback and same-file aliases.
+if [[ ! -x /usr/bin/fd ]]; then
+	ln -s -- "$ROOT/bin" "$WORK/shim-alias"
+	run_guarded "$WORK/fd-resolve.err" env PATH="$ROOT/bin:$WORK/shim-alias:$PATH" fd --version </dev/null
+	assert_equals "$guard_status" 0 'fd resolves past both shim directory spellings'
+	assert_contains "$WORK/stdout" 'fd ' 'resolved fd is the real executable'
+	run_guarded "$WORK/fd-missing.err" env PATH="$ROOT/bin:/usr/bin:/bin" fd --version </dev/null
+	assert_equals "$guard_status" 127 'a missing real fd fails without recursion'
+	assert_contains "$WORK/fd-missing.err" 'not found outside the shim directory' 'missing tool is explicit'
+fi
+pass 'user-local fd lookup skips shim aliases and reports a missing binary'
+
+mkdir -p -- "$WORK/generator/scripts" "$WORK/generator/bin"
+cp -- "$ROOT/scripts/generate-search-shims.sh" "$WORK/generator/scripts/"
+"$WORK/generator/scripts/generate-search-shims.sh" >"$WORK/generator.out"
+for search in grep rg find fd; do
+	cmp -- "$ROOT/bin/$search" "$WORK/generator/bin/$search" || fail "$search generation is reproducible"
+done
+for search in ag ack; do
+	if ! type -P "$search" >/dev/null; then
+		[[ ! -e $WORK/generator/bin/$search ]] || fail "uninstalled $search should not get a shim"
+	fi
+done
+pass 'search generator is reproducible and skips uninstalled tools'
 
 printf '# %d tests passed\n' "$pass_count"
