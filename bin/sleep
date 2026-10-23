@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Refuse long turn-blocking waits. Never read stdin; let sleep validate syntax.
+
+if [[ ${PI_SHIMS_CONFIRM:-} == 1 ]]; then
+	exec /bin/sleep "$@"
+fi
+
+# Parse argv in BEGIN, not awk's input stream. Compensated addition avoids
+# accumulating rounding error when many small decimal operands are summed.
+if LC_ALL=C awk '
+	BEGIN {
+		# Some awk implementations retain the option terminator in ARGV.
+		for (i = ARGV[1] == "--" ? 2 : 1; i < ARGC; i++) {
+			operand = ARGV[i]
+			if (operand !~ /^[+]?([0-9]+([.][0-9]*)?|[.][0-9]+)[smhd]?$/)
+				exit 1
+			unit = substr(operand, length(operand), 1)
+			factor = unit == "d" ? 86400 : unit == "h" ? 3600 : unit == "m" ? 60 : 1
+			seconds = (operand + 0) * factor
+			if (!long_wait) {
+				adjusted = seconds - correction
+				next_sum = total + adjusted
+				correction = (next_sum - total) - adjusted
+				total = next_sum
+				if (total >= 10) long_wait = 1
+			}
+		}
+		exit !long_wait
+	}
+' -- "$@"; then
+	printf '%s\n' 'pi-shims: sleep refused (total >= 10s). Blocking the turn on a timer stalls the task.' >&2
+	printf '%s\n' 'Run the long process in the background (tmux/nohup/&), set up a watcher or notification so completion starts a new turn (see the pi-notify skill when installed), and keep pushing the task forward meanwhile.' >&2
+	printf '%s\n' 'To wait deliberately: /bin/sleep, or PI_SHIMS_CONFIRM=1 (also covers child scripts).' >&2
+	exit 77
+fi
+
+exec /bin/sleep "$@"

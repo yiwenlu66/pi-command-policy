@@ -59,6 +59,20 @@ PI_SHIMS_CONFIRM=1 rm -rf ./build
 RM_GUARD_CONFIRM=1 bash ./cleanup.sh
 ```
 
+## sleep — refuse long turn-blocking waits
+
+**Trigger:** the sum of all operands is at least **10 seconds**. Decimal values
+and GNU suffixes `s`, `m`, `h`, and `d` are supported; `sleep 6 4` is a ten-second
+wait. If any operand is unparseable, the entire invocation passes to `/bin/sleep`
+unchanged so the real command handles validation and options.
+
+**Action:** refuse with guidance to background the long process using tmux,
+nohup, or `&`; arrange a watcher/notification that starts a new turn on completion
+(the pi-notify skill provides this when installed); keep advancing the task.
+Short sleeps execute silently.
+
+**Bypass:** `/bin/sleep` or `PI_SHIMS_CONFIRM=1` (inherited by child scripts).
+
 ## Coverage boundary
 
 Only commands resolved through **PATH** are intercepted, including child scripts,
@@ -87,7 +101,7 @@ working clone.
 
 ## Development
 
-Requires Bash, GNU coreutils (`timeout`, `realpath`, `sleep`, `rm`), `du`, and
+Requires Bash, awk, GNU coreutils (`timeout`, `realpath`, `sleep`, `rm`), `du`, and
 Node.js with TypeScript stripping (22.18+), plus Pi's peer dependency installed.
 
 ```sh

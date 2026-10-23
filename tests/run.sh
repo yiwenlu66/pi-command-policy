@@ -45,7 +45,7 @@ run_guarded() {
 	set -e
 }
 
-printf '1..10\n'
+printf '1..17\n'
 
 # 1. A normal recursive deletion is blocked and describes the absolute directory.
 protected_dir="$WORK/protected dir"
@@ -138,5 +138,50 @@ pass 'PI_SHIMS_CONFIRM=1 confirms nested rm'
 
 node "$ROOT/tests/extension.mjs"
 pass 'extension prepends PATH and exposes only /shims with active files'
+
+run_guarded "$WORK/sleep-short.err" sleep .001s .00001m .0000001h .00000001d
+assert_equals "$guard_status" 0 'small decimal durations with all suffixes pass'
+[[ ! -s $WORK/sleep-short.err ]] || fail 'short sleep is silent'
+pass 'sleep sums small decimal and suffixed operands silently'
+
+for duration in 10 10s .2m .003h .0002d +10.0s; do
+	run_guarded "$WORK/sleep-long.err" sleep "$duration"
+	assert_equals "$guard_status" 77 "sleep $duration is refused"
+done
+assert_contains "$WORK/sleep-long.err" 'background' 'long sleep suggests background work'
+assert_contains "$WORK/sleep-long.err" 'pi-notify' 'long sleep mentions completion notification'
+pass 'sleep refuses the threshold and all GNU unit suffixes'
+
+run_guarded "$WORK/sleep-sum.err" sleep 9.99s .01s
+assert_equals "$guard_status" 77 'decimal operands sum to the threshold'
+run_guarded "$WORK/sleep-sum.err" sleep 0.1m 4s
+assert_equals "$guard_status" 77 'mixed suffix operands sum to the threshold'
+small_operands=()
+for ((i = 0; i < 100; i++)); do small_operands+=(.1); done
+run_guarded "$WORK/sleep-sum.err" sleep "${small_operands[@]}"
+assert_equals "$guard_status" 77 'many decimal operands sum to the threshold'
+pass 'sleep sums multiple operands, including decimal rounding cases'
+
+run_guarded "$WORK/sleep-invalid.err" sleep 10 invalid
+assert_equals "$guard_status" 1 'an invalid operand delegates validation even after a long operand'
+assert_contains "$WORK/sleep-invalid.err" 'invalid time interval' 'real sleep validates operands'
+run_guarded "$WORK/sleep-version.err" sleep --version
+assert_equals "$guard_status" 0 'unknown option passes through to real sleep'
+assert_contains "$WORK/stdout" 'GNU coreutils' 'sleep passthrough preserves normal output'
+pass 'unparseable sleep operands pass through unchanged'
+
+run_guarded "$WORK/sleep-bypass.err" timeout .1s env PI_SHIMS_CONFIRM=1 sleep 10
+assert_equals "$guard_status" 124 'global bypass actually waits until external timeout'
+[[ ! -s $WORK/sleep-bypass.err ]] || fail 'sleep global bypass is silent'
+pass 'PI_SHIMS_CONFIRM=1 bypasses long sleep refusal'
+
+run_guarded "$WORK/sleep-direct.err" timeout .1s /bin/sleep 10
+assert_equals "$guard_status" 124 'absolute sleep actually waits until external timeout'
+[[ ! -s $WORK/sleep-direct.err ]] || fail 'absolute sleep is silent'
+pass '/bin/sleep bypasses the shim'
+
+printf 'stdin untouched\n' | run_guarded "$WORK/sleep-stdin.err" bash -c 'sleep 10; status=$?; cat; exit "$status"'
+assert_contains "$WORK/stdout" 'stdin untouched' 'sleep refusal leaves stdin available to the caller'
+pass 'sleep shim never consumes caller stdin'
 
 printf '# %d tests passed\n' "$pass_count"
