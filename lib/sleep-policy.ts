@@ -43,6 +43,10 @@ function longSleep(command: Command): boolean {
 			optionsEnded = true;
 			continue;
 		}
+		if (value && /^(?:inf|infinity)$/i.test(value)) {
+			long = true;
+			continue;
+		}
 		// This validates a parsed operand, never shell source. Unknown syntax is
 		// left to the real sleep command, even after a known long operand.
 		const match = value?.match(/^\+?(\d+(?:\.\d*)?|\.\d+)([smhd]?)$/);
@@ -64,6 +68,9 @@ export function sleepPolicyReason(source: string): string | undefined {
 	let found = false;
 	let uncertain = false;
 	function visit(node: SyntaxNode): void {
+		// Background statements do not hold the Bash tool open. Prune the whole
+		// statement, including compound commands, rather than individual sleeps.
+		if (node.type === "Statement" && node.background) return;
 		// Even expansions in a here-document are outside this policy's scope.
 		if (node.type === "HereDoc") return;
 		if (node.type === "Script" && node.errors?.length) uncertain = true;

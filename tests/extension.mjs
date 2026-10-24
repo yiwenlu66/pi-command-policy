@@ -47,7 +47,9 @@ test("direct and compound Bash sleeps block before execution", async () => {
 		"sleep '30'", "'sleep' \"9\"'00'", String.raw`sle\ep 9\00`, "sleep $'1\\x30'",
 		"sleep 6 4", "sleep -- 900", "sleep 6 -- 4", "sleep 9.99s .01s", "sleep 0.1m 4s", `sleep ${Array(100).fill(".1").join(" ")}`,
 		"sleep .2m", "sleep .003h", "sleep .0002d", "sleep +10.0s", "sleep 30 >out",
-		"echo \"$(sleep 30)\"", "cat <(sleep 30)", "sleep 30 &",
+		"echo \"$(sleep 30)\"", "cat <(sleep 30)",
+		"sleep inf", "sleep infinity", "sleep INF", "sleep 'infinity'", "sleep -- inf", "sleep 1 inf",
+		"sleep 30 & sleep 30",
 		"PI_NOTIFY_BACKGROUND=1 sleep 900", "PI_NOTIFY_BACKGROUND=0 sleep 900",
 		`echo '${shimDirectory}'; sleep 900`, `export PATH="${shimDirectory}:$PATH"\nsleep 900`,
 	];
@@ -73,6 +75,8 @@ test("text, comments, heredocs, dynamic operands, opaque code and uncertainty al
 		"sleep \"$WAIT\"", "sleep 900 $WAIT", "sleep ${WAIT:-900}", "sleep $((900))", "sleep {1,900}", "sleep 9*", "$COMMAND 900",
 		"sleep 900; if", "echo 'unterminated; sleep 900", "echo $(sleep 900; if)",
 		"/bin/sleep 900", "PI_COMMAND_POLICY_CONFIRM=1 sleep 900", "PI_SHIMS_CONFIRM=1 sleep 900",
+		"sleep 30 &", "(sleep 30; echo late) &", "true && sleep 30 &", "sleep 30 & wait",
+		"while sleep 30; do :; done &", "sleep inf &", "sleep inf invalid", "sleep infinity $WAIT",
 	];
 	for (const command of cases) {
 		const { result } = await preflight(command);
@@ -122,6 +126,56 @@ test("PATH injection remains idempotent; other tools unchanged; renamed status l
 test("allowed text, heredoc and opaque child code run through actual local Bash", async () => {
 	const result = await execute("printf '%s\\n' 'sleep 900'; cat <<'EOF'\nsleep 900\nEOF\nbash -c 'sleep .02; echo opaque-done'");
 	assert.match(output(result), /sleep 900\nsleep 900\nopaque-done/);
+});
+
+test("background statements return promptly through actual Bash and leave no live timer after cleanup", async () => {
+	async function descendants(pid) {
+		const children = (await readFile(`/proc/${pid}/task/${pid}/children`, "utf8")).trim();
+		const nested = await Promise.all(children ? children.split(/\s+/).map((child) => descendants(Number(child))) : []);
+		return [pid, ...nested.flat()];
+	}
+	for (const background of ["sleep 30 &", "(sleep 30; echo late) &", "true && sleep 30 &"]) {
+		const pidFile = join(work, "background-pid");
+		await rm(pidFile, { force: true });
+		const abort = new AbortController();
+		const timeout = setTimeout(() => abort.abort(), 1500);
+		let pids = [];
+		try {
+			const started = performance.now();
+			const result = await execute(`${background} printf '%s' "$!" > '${pidFile}'`, abort.signal);
+			assert.ok(performance.now() - started < 1500, `${background} must not wait for the 30s timer`);
+			assert.doesNotMatch(output(result), /late/);
+			const pid = Number(await readFile(pidFile, "utf8"));
+			pids = await descendants(pid);
+			const commands = await Promise.all(pids.map((child) => readFile(`/proc/${child}/cmdline`, "utf8")));
+			assert.ok(commands.includes("sleep\x0030\x00"), "a real long timer remains alive after Bash returns");
+		} finally {
+			clearTimeout(timeout);
+			abort.abort();
+			// On assertion/timeout failure, still collect any launched tree before
+			// deleting its pid file. No background timer may escape this test.
+			if (!pids.length) {
+				try { pids = await descendants(Number(await readFile(pidFile, "utf8"))); } catch {}
+			}
+			for (const pid of pids) {
+				try { process.kill(pid, "SIGKILL"); } catch (error) { if (error.code !== "ESRCH") throw error; }
+			}
+			for (const pid of pids) {
+				const deadline = Date.now() + 1000;
+				while (true) {
+					try {
+						const stat = await readFile(`/proc/${pid}/stat`, "utf8");
+						if (/^[ZX]/.test(stat.slice(stat.lastIndexOf(")") + 2))) break;
+					} catch (error) {
+						if (error.code === "ENOENT" || error.code === "ESRCH") break;
+						throw error;
+					}
+					assert.ok(Date.now() < deadline, "cleanup leaves no executing child");
+					await new Promise((resolve) => setTimeout(resolve, 10));
+				}
+			}
+		}
+	}
 });
 
 test("child script really runs a long system sleep with inherited PATH and no exemptions", async () => {

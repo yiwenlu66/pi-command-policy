@@ -77,7 +77,8 @@ RM_GUARD_CONFIRM=1 bash ./cleanup.sh
 **Trigger:** a command named `sleep` in shell source supplied directly to Pi's
 Bash tool, with statically known operands totaling at least **10 seconds**.
 Decimal values and GNU suffixes `s`, `m`, `h`, and `d` are supported; `sleep 6 4`
-is ten seconds. GNU's `--` option terminator is recognized (`sleep -- 900`).
+is ten seconds. Literal GNU `inf` and `infinity` operands (case-insensitive) also
+count as long waits. GNU's `--` option terminator is recognized (`sleep -- 900`).
 Ordinary quoting and backslash escapes are decoded by the parser.
 
 The parser sees command structure, so `make && sleep 900`, pipelines, groups,
@@ -87,7 +88,10 @@ source and are checked too. Plain quoted text (`echo 'sleep 900'`), comments, an
 heredoc contents never trigger, including expansions inside heredocs. This is a
 syntactic check, not control-flow analysis: even an unreachable command or an
 uncalled function body containing a known long sleep can block the whole call.
-Direct background `sleep 30 &` is also checked; use a worker script for timers.
+Background statements are exempt: `sleep 30 &`, `(sleep 30; echo done) &`, and
+`make && sleep 30 &` do not hold the Bash tool open. The entire background
+statement is skipped. Later `wait` commands are not inferred, so `sleep 30 & wait`
+is also allowed even though it waits for completion.
 
 **Action:** block the entire tool call before execution with guidance to run
 long work in the background, arrange a watcher/completion notification, and keep
