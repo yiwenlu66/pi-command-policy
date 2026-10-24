@@ -8,11 +8,11 @@ session reuse, including inside invoked child scripts.
 ## Install
 
 ```sh
-pi install git:github.com/yiwenlu66/pi-command-policy
+pi install git:github.com/yiwenlu66/pi-command-policy@v0.3.0
 ```
 
-Use a published tag for a pinned install. Start a new session or `/reload` after
-installation or upgrade: the sleep policy lives in the extension handler.
+Start a new session or `/reload` after installation or upgrade: the sleep policy
+lives in the extension handler.
 `/command-policy` reports the direct-input sleep policy and active `bin/` files.
 
 ## Mechanism

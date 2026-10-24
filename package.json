@@ -1,6 +1,6 @@
 {
   "name": "pi-command-policy",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "Pi command policies: direct Bash long-sleep guidance, PATH rm confirmation, search timeouts, and ssh reminders",
   "license": "MIT",
   "keywords": [
