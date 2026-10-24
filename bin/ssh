@@ -2,7 +2,7 @@
 # Remind, never refuse: one-shot ssh also bootstraps persistent sessions.
 # Parsing inspects argv only and never reads stdin.
 
-real_binary=${PI_SHIMS_SSH_REAL:-/usr/bin/ssh}
+real_binary=${PI_COMMAND_POLICY_SSH_REAL:-${PI_SHIMS_SSH_REAL:-/usr/bin/ssh}}
 positionals=0
 skip_next=0
 parsing_flags=1
@@ -36,6 +36,6 @@ for argument in "$@"; do
 done
 
 if (( positionals >= 2 )); then
-	printf '%s\n' 'pi-shims: one-shot ssh pays full connection setup and loses shell state; for repeated remote work, drive one persistent SSH session inside tmux (see the tmux skill).' >&2
+	printf '%s\n' 'pi-command-policy: one-shot ssh pays full connection setup and loses shell state; for repeated remote work, drive one persistent SSH session inside tmux (see the tmux skill).' >&2
 fi
 exec "$real_binary" "$@"

@@ -1,9 +1,11 @@
 {
-  "name": "pi-shims",
+  "name": "pi-command-policy",
   "version": "0.2.2",
-  "description": "PATH-level shims that shape Pi agent working style: rm confirmation, long-sleep refusal, search timeouts, ssh one-shot reminders",
+  "description": "Pi command policies: direct Bash long-sleep guidance, PATH rm confirmation, search timeouts, and ssh reminders",
   "license": "MIT",
-  "keywords": ["pi-package"],
+  "keywords": [
+    "pi-package"
+  ],
   "scripts": {
     "test": "./tests/run.sh"
   },
@@ -11,10 +13,19 @@
     "@earendil-works/pi-coding-agent": "*"
   },
   "pi": {
-    "extensions": ["./extensions"]
+    "extensions": [
+      "./extensions"
+    ]
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/yiwenlu66/pi-shims.git"
-  }
+    "url": "https://github.com/yiwenlu66/pi-command-policy.git"
+  },
+  "dependencies": {
+    "unbash": "6.0.1"
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "type": "module"
 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# PATH-level rm confirmation shim for pi-shims. It never reads stdin.
+# PATH-level rm confirmation shim for pi-command-policy. It never reads stdin.
 
-if [[ ${PI_SHIMS_CONFIRM:-} == 1 || ${RM_GUARD_CONFIRM:-} == 1 ]]; then
+if [[ ${PI_COMMAND_POLICY_CONFIRM:-} == 1 || ${PI_SHIMS_CONFIRM:-} == 1 || ${RM_GUARD_CONFIRM:-} == 1 ]]; then
 	exec /bin/rm "$@"
 fi
 
@@ -74,7 +74,7 @@ report_directory_details() {
 }
 
 shopt -s dotglob nullglob
-printf '%s\n' 'pi-shims: rm deletion blocked pending confirmation' >&2
+printf '%s\n' 'pi-command-policy: rm deletion blocked pending confirmation' >&2
 printf '%s\n' 'targets:' >&2
 
 for operand in "${operands[@]}"; do
@@ -94,5 +94,5 @@ for operand in "${operands[@]}"; do
 	fi
 done
 
-printf '%s\n' 'to confirm: re-run with /bin/rm (direct), or PI_SHIMS_CONFIRM=1 (covers shims inside scripts; RM_GUARD_CONFIRM=1 also confirms rm)' >&2
+printf '%s\n' 'to confirm: re-run with /bin/rm (direct), or PI_COMMAND_POLICY_CONFIRM=1 (covers child scripts; legacy PI_SHIMS_CONFIRM=1 and rm-only RM_GUARD_CONFIRM=1 also work)' >&2
 exit 77

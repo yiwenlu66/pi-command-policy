@@ -2,6 +2,7 @@
 set -euo pipefail
 
 # Exercise defaults regardless of bypass/override variables in the caller.
+unset PI_COMMAND_POLICY_CONFIRM PI_COMMAND_POLICY_SEARCH_TIMEOUT PI_COMMAND_POLICY_SSH_REAL
 unset PI_SHIMS_CONFIRM RM_GUARD_CONFIRM PI_SHIMS_SEARCH_TIMEOUT PI_SHIMS_SSH_REAL PI_NOTIFY_BACKGROUND
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
@@ -48,7 +49,7 @@ run_guarded() {
 	set -e
 }
 
-printf '1..39\n'
+printf '1..31\n'
 
 # 1. A normal recursive deletion is blocked and describes the absolute directory.
 protected_dir="$WORK/protected dir"
@@ -140,62 +141,7 @@ assert_missing "$global_dir" 'global bypass deletes through child shim'
 pass 'PI_SHIMS_CONFIRM=1 confirms nested rm'
 
 node "$ROOT/tests/extension.mjs"
-pass 'extension prepends PATH and exposes only /shims with active files'
-
-run_guarded "$WORK/sleep-short.err" sleep .001s .00001m .0000001h .00000001d
-assert_equals "$guard_status" 0 'small decimal durations with all suffixes pass'
-[[ ! -s $WORK/sleep-short.err ]] || fail 'short sleep is silent'
-pass 'sleep sums small decimal and suffixed operands silently'
-
-for duration in 10 10s .2m .003h .0002d +10.0s; do
-	run_guarded "$WORK/sleep-long.err" sleep "$duration"
-	assert_equals "$guard_status" 77 "sleep $duration is refused"
-done
-assert_contains "$WORK/sleep-long.err" 'background' 'long sleep suggests background work'
-assert_contains "$WORK/sleep-long.err" 'pi-notify' 'long sleep mentions completion notification'
-pass 'sleep refuses the threshold and all GNU unit suffixes'
-
-run_guarded "$WORK/sleep-sum.err" sleep 9.99s .01s
-assert_equals "$guard_status" 77 'decimal operands sum to the threshold'
-run_guarded "$WORK/sleep-sum.err" sleep 0.1m 4s
-assert_equals "$guard_status" 77 'mixed suffix operands sum to the threshold'
-small_operands=()
-for ((i = 0; i < 100; i++)); do small_operands+=(.1); done
-run_guarded "$WORK/sleep-sum.err" sleep "${small_operands[@]}"
-assert_equals "$guard_status" 77 'many decimal operands sum to the threshold'
-pass 'sleep sums multiple operands, including decimal rounding cases'
-
-run_guarded "$WORK/sleep-invalid.err" sleep 10 invalid
-assert_equals "$guard_status" 1 'an invalid operand delegates validation even after a long operand'
-assert_contains "$WORK/sleep-invalid.err" 'invalid time interval' 'real sleep validates operands'
-run_guarded "$WORK/sleep-version.err" sleep --version
-assert_equals "$guard_status" 0 'unknown option passes through to real sleep'
-assert_contains "$WORK/stdout" 'GNU coreutils' 'sleep passthrough preserves normal output'
-pass 'unparseable sleep operands pass through unchanged'
-
-run_guarded "$WORK/sleep-bypass.err" timeout .1s env PI_SHIMS_CONFIRM=1 sleep 10
-assert_equals "$guard_status" 124 'global bypass actually waits until external timeout'
-[[ ! -s $WORK/sleep-bypass.err ]] || fail 'sleep global bypass is silent'
-pass 'PI_SHIMS_CONFIRM=1 bypasses long sleep refusal'
-
-run_guarded "$WORK/sleep-notify.err" timeout .05s env PI_NOTIFY_BACKGROUND=1 sleep 10
-assert_equals "$guard_status" 124 'notify background marker reaches the real timer'
-[[ ! -s $WORK/sleep-notify.err ]] || fail 'notify background sleep is silent'
-run_guarded "$WORK/sleep-notify-child.err" timeout .05s env PI_NOTIFY_BACKGROUND=1 bash -c 'sleep 10'
-assert_equals "$guard_status" 124 'notify background marker is inherited by child scripts'
-[[ ! -s $WORK/sleep-notify-child.err ]] || fail 'child notify background sleep is silent'
-run_guarded "$WORK/sleep-notify-value.err" env PI_NOTIFY_BACKGROUND=0 sleep 10
-assert_equals "$guard_status" 77 'only the exact marker value 1 exempts sleep'
-pass 'PI_NOTIFY_BACKGROUND=1 reaches the real sleep timer, including child scripts'
-
-run_guarded "$WORK/sleep-direct.err" timeout .1s /bin/sleep 10
-assert_equals "$guard_status" 124 'absolute sleep actually waits until external timeout'
-[[ ! -s $WORK/sleep-direct.err ]] || fail 'absolute sleep is silent'
-pass '/bin/sleep bypasses the shim'
-
-printf 'stdin untouched\n' | run_guarded "$WORK/sleep-stdin.err" bash -c 'sleep 10; status=$?; cat; exit "$status"'
-assert_contains "$WORK/stdout" 'stdin untouched' 'sleep refusal leaves stdin available to the caller'
-pass 'sleep shim never consumes caller stdin'
+pass 'real Pi extension boundary, parsed sleep policy, unrestricted child timers, and inherited guards'
 
 # A named FIFO blocks the real grep/rg file scan without making stdin a pipe.
 run_fifo_search() {
@@ -351,7 +297,7 @@ pass 'ssh reminder never consumes stdin'
 run_guarded "$WORK/ssh-real.err" ssh -V
 assert_equals "$guard_status" 0 'default ssh executable runs without a connection'
 assert_contains "$WORK/ssh-real.err" 'OpenSSH' 'default ssh resolves the real system binary'
-if grep -F pi-shims "$WORK/ssh-real.err" >/dev/null; then fail 'ssh -V must not get a reminder'; fi
+if grep -F pi-command-policy "$WORK/ssh-real.err" >/dev/null; then fail 'ssh -V must not get a reminder'; fi
 pass 'default ssh path delegates silently to the real binary'
 
 notify_dir="$WORK/notify-marker-rm"
@@ -365,14 +311,6 @@ run_guarded "$WORK/notify-ssh.err" env PI_NOTIFY_BACKGROUND=1 PI_SHIMS_SSH_REAL=
 assert_equals "$guard_status" 23 'notify marker keeps ssh delegation and status'
 assert_contains "$WORK/notify-ssh.err" 'one-shot ssh' 'notify marker keeps the ssh reminder'
 pass 'PI_NOTIFY_BACKGROUND=1 leaves rm, search, and ssh guards unchanged'
-
-run_guarded "$WORK/sleep-below.err" timeout .05s sleep 9.999s
-assert_equals "$guard_status" 124 'sleep just below the threshold reaches the real timer'
-[[ ! -s $WORK/sleep-below.err ]] || fail 'sleep below threshold is silent'
-run_guarded "$WORK/sleep-child.err" timeout .05s env PI_SHIMS_CONFIRM=1 bash -c 'sleep 10'
-assert_equals "$guard_status" 124 'sleep global bypass is inherited by child scripts'
-[[ ! -s $WORK/sleep-child.err ]] || fail 'child sleep bypass is silent'
-pass 'sleep just below threshold passes and global bypass reaches child scripts'
 
 # Capture the timeout invocation without waiting for the production 60s limit.
 mkdir -p -- "$WORK/timeout-bin"
@@ -392,7 +330,7 @@ pass 'filesystem search uses a 60s timeout by default'
 
 # Model package migration: identical copies, symlink aliases, and a different
 # pi-shims version all coexist before the real user-local binary in PATH.
-mkdir -p -- "$WORK/real-search-bin" "$WORK/copied/bin" "$WORK/older/bin"
+mkdir -p -- "$WORK/real-search-bin" "$WORK/copied/bin" "$WORK/older/bin" "$WORK/renamed/bin"
 for search in ag ack; do
 	printf '#!/usr/bin/env bash\nprintf "fake %s version\\n"\n' "$search" >"$WORK/real-search-bin/$search"
 	chmod +x "$WORK/real-search-bin/$search"
@@ -400,16 +338,29 @@ done
 PATH="$WORK/real-search-bin:$PATH" "$WORK/generator/scripts/generate-search-shims.sh" >"$WORK/generator-all.out"
 cp -- "$WORK/generator/bin/"* "$WORK/copied/bin/"
 cp -- "$WORK/generator/bin/"* "$WORK/older/bin/"
+cp -- "$WORK/generator/bin/"* "$WORK/renamed/bin/"
 printf '{"name":"pi-shims","version":"0.2.0"}\n' >"$WORK/older/package.json"
+printf '{"name":"pi-command-policy","version":"0.3.0"}\n' >"$WORK/renamed/package.json"
 for search in grep rg find fd ag ack; do
 	printf '\n# Different generated package version.\n' >>"$WORK/older/bin/$search"
+	printf '\n# Renamed package version.\n' >>"$WORK/renamed/bin/$search"
 done
 ln -s -- "$WORK/copied/bin" "$WORK/copied-alias"
 for search in grep rg find fd ag ack; do
-	run_guarded "$WORK/search-copies.err" /usr/bin/timeout 1s env PATH="$WORK/generator/bin:$WORK/copied-alias:$WORK/copied/bin:$WORK/older/bin:$ROOT/bin:$WORK/real-search-bin:$PATH" "$WORK/generator/bin/$search" --version </dev/null
+	run_guarded "$WORK/search-copies.err" /usr/bin/timeout 1s env PATH="$WORK/generator/bin:$WORK/copied-alias:$WORK/copied/bin:$WORK/older/bin:$WORK/renamed/bin:$ROOT/bin:$WORK/real-search-bin:$PATH" "$WORK/generator/bin/$search" --version </dev/null
 	assert_equals "$guard_status" 0 "$search skips other installed shim copies and reaches the real binary"
 	[[ ! -s $WORK/search-copies.err ]] || fail "$search version probe with duplicate shims is silent"
 done
-pass 'all six search shims skip identical copies, symlink aliases, and other package versions'
+pass 'all six search shims skip identical copies, symlink aliases, and old and renamed package versions'
+
+canonical_dir="$WORK/canonical-confirmed"
+mkdir -p -- "$canonical_dir"
+run_guarded "$WORK/canonical-rm.err" env PI_COMMAND_POLICY_CONFIRM=1 rm -rf -- "$canonical_dir"
+assert_equals "$guard_status" 0 'canonical confirmation allows rm'
+assert_missing "$canonical_dir" 'canonical confirmation deletes target'
+run_guarded "$WORK/canonical-search.err" env PI_COMMAND_POLICY_CONFIRM=1 PI_COMMAND_POLICY_SEARCH_TIMEOUT=.01s find "$search_dir" -maxdepth 0 -exec /bin/sleep .03 \;
+assert_equals "$guard_status" 0 'canonical confirmation allows slow search'
+[[ ! -s $WORK/canonical-search.err ]] || fail 'canonical search confirmation is silent'
+pass 'PI_COMMAND_POLICY_CONFIRM confirms rm and search while legacy confirmations remain supported'
 
 printf '# %d tests passed\n' "$pass_count"
