@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isToolCallEventType, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { sleepPolicyReason } from "../lib/sleep-policy.ts";
+import { noopPolicyReason } from "../lib/noop-policy.ts";
 
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const shimDirectory = join(packageRoot, "bin");
@@ -11,7 +12,9 @@ const pathExport = `export PATH="${shimDirectory}:$PATH"\n`;
 export default function (pi: ExtensionAPI) {
 	pi.on("tool_call", (event) => {
 		if (!isToolCallEventType("bash", event)) return;
-		const reason = sleepPolicyReason(event.input.command);
+		// Sleep is checked first so its more specific message wins; the no-op
+		// policy has no confirmation bypass, so it ignores PI_COMMAND_POLICY_CONFIRM.
+		const reason = sleepPolicyReason(event.input.command) ?? noopPolicyReason(event.input.command);
 		if (reason) return { block: true, reason };
 		if (event.input.command.includes(shimDirectory)) return;
 
@@ -23,7 +26,7 @@ export default function (pi: ExtensionAPI) {
 		handler: async (_args, ctx) => {
 			const entries = await readdir(shimDirectory, { withFileTypes: true });
 			const shims = entries.filter((entry) => entry.isFile()).map((entry) => entry.name).sort();
-			ctx.ui.notify(`pi-command-policy active\nsleep: direct Bash input only (>= 10s); child scripts unrestricted\nshim directory: ${shimDirectory}\nshims: ${shims.join(", ") || "none"}`, "info");
+			ctx.ui.notify(`pi-command-policy active\nsleep: direct Bash input only (>= 10s); child scripts unrestricted\nno-op: bare true/: and empty while-true/until-false loops refused (no bypass)\nshim directory: ${shimDirectory}\nshims: ${shims.join(", ") || "none"}`, "info");
 		},
 	});
 }

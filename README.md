@@ -1,9 +1,9 @@
 # pi-command-policy
 
 Command policies that shape how Pi agents work. The extension parses shell code
-supplied directly to the Bash tool to discourage long waits. Separate Bash
-scripts in `bin/` confirm deletion targets, bound searches, and remind about SSH
-session reuse, including inside invoked child scripts.
+supplied directly to the Bash tool to discourage long waits and no-op busy loops.
+Separate Bash scripts in `bin/` confirm deletion targets, bound searches, and
+remind about SSH session reuse, including inside invoked child scripts.
 
 ## Install
 
@@ -11,9 +11,10 @@ session reuse, including inside invoked child scripts.
 pi install git:github.com/yiwenlu66/pi-command-policy@v0.3.0
 ```
 
-Start a new session or `/reload` after installation or upgrade: the sleep policy
-lives in the extension handler.
-`/command-policy` reports the direct-input sleep policy and active `bin/` files.
+Start a new session or `/reload` after installation or upgrade: the direct-input
+policies live in the extension handler.
+`/command-policy` reports the direct-input sleep and no-op policies and active
+`bin/` files.
 
 ## Mechanism
 
@@ -21,6 +22,7 @@ lives in the extension handler.
 Pi bash tool input
     │ command-policy tool_call handler parses the supplied Bash source
     ├─ literal sleep totaling >=10s → block tool call with workflow guidance
+    ├─ bare no-op (true/:/paths) or empty while-true/until-false loop → block tool call
     │
     │ otherwise prepend: export PATH="<package>/bin:$PATH"
     ▼
@@ -128,6 +130,41 @@ in `package.json`; tolerant parse errors fail open. Other shell dialects are
 outside scope. The extension tests run through Pi's real loader and event runner,
 not only the parsing helper.
 
+## true, `:` and empty loops — refuse no-op busy-waits
+
+**Trigger:** a Bash tool call whose supplied source is either one or more bare
+no-op commands — `true`, `:`, `/bin/true`, `/usr/bin/true` — with no arguments
+and no redirections, or an `until false`/`while true` loop whose condition can
+never change and whose body is only such no-ops.
+
+**Why here and not `bin/`:** `true` and `:` are Bash **built-ins**. A `bin/true`
+PATH shim would never run, because Bash resolves a built-in before consulting
+`PATH`. Detection therefore lives in the same AST check as sleep, before
+execution.
+
+**Action:** block the whole tool call with guidance. A lone `true` prints
+nothing, so repeating it only spins tool calls; it does not wait for a background
+job or advance the task. An empty `while true` loop spins a CPU core and holds
+the turn. The guidance points to running the work in the background and arming a
+watcher/completion notification.
+
+**No bypass.** Unlike sleep, this policy has no `PI_COMMAND_POLICY_CONFIRM`
+escape and no `bin/` equivalent: `PI_COMMAND_POLICY_CONFIRM=1 true` and
+`/bin/true` are refused too, as is an assignment-prefixed `FOO=1 true`. A bare
+no-op is never a deliberate action.
+
+**Left alone:** a `true`/`:` with a redirection (`: >file` truncates a file) or
+an argument (`: ${X:=set}` asserts); `true` as a condition or condition part
+(`if true; then ...; fi`, `true && ...`); a normal loop body or terminating loop
+(`while true; do work; break; done`); a loop with a real condition (`while
+false`, `until true`); any background statement (`true &`, `while true; do :;
+done &`); heredoc bodies; and opaque `bash -c '...'` strings. Text (`echo
+true`) and pipelines (`true | cat`) never trigger. Shell wrappers such as
+`command true`/`env true` are outside the named-command check, matching the sleep
+policy's treatment of `env sleep`. Like sleep, this is workflow guidance rather
+than a sandbox: an uncalled function body containing a busy loop can still block
+the whole call.
+
 ## grep, rg, find, fd — bound filesystem searches
 
 **Trigger:** a search runs longer than **60 seconds**. These shims run the real
@@ -191,8 +228,8 @@ connect to a remote host.
 
 ## Coverage boundary
 
-The sleep policy sees **only Bash tool input**, before execution. User `!`/`!!`
-commands and Pi's non-Bash tools are not intercepted. Script bodies, runtime
+The direct-input syntax policies (sleep and no-op) see **only Bash tool input**,
+before execution. User `!`/`!!` commands and Pi's non-Bash tools are not intercepted. Script bodies, runtime
 expansions, and opaque strings are outside that check. It is independent of
 PATH, so direct-input sleep guidance applies even when another Bash backend
 routes execution remotely; no remote files are inspected.

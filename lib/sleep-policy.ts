@@ -1,24 +1,7 @@
-import { forEachChild, parse, type Command, type SyntaxNode, type Word, type WordPart } from "unbash";
+import { forEachChild, parse, type Command, type SyntaxNode } from "unbash";
+import { literal } from "./shell-words.ts";
 
 const confirmationNames = ["PI_COMMAND_POLICY_CONFIRM", "PI_SHIMS_CONFIRM"];
-
-function isStaticPart(part: WordPart): boolean {
-	switch (part.type) {
-		case "Literal":
-		case "SingleQuoted":
-		case "AnsiCQuoted":
-			return true;
-		case "DoubleQuoted":
-			return part.parts.every(isStaticPart);
-		default:
-			return false;
-	}
-}
-
-function literal(word: Word | undefined): string | undefined {
-	if (!word || (word.parts && !word.parts.every(isStaticPart))) return undefined;
-	return word.value;
-}
 
 function confirmed(command: Command): boolean {
 	return confirmationNames.some((name) => {

@@ -84,6 +84,52 @@ test("text, comments, heredocs, dynamic operands, opaque code and uncertainty al
 	}
 });
 
+test("bare no-op commands block with guidance and no confirmation bypass", async () => {
+	const cases = [
+		"true", ":", "true;", "  true  ", "true # comment", "/bin/true", "/usr/bin/true",
+		": ;", "true\ntrue", "PI_COMMAND_POLICY_CONFIRM=1 true", "PI_SHIMS_CONFIRM=1 :", "FOO=bar true",
+	];
+	for (const command of cases) {
+		const { event, result } = await preflight(command);
+		assert.equal(result?.block, true, command);
+		assert.match(result.reason, /pi-command-policy: bare `true`\/`:` refused/);
+		assert.match(result.reason, /background/);
+		assert.match(result.reason, /watcher or completion notification/);
+		assert.doesNotMatch(result.reason, /pi-notify/);
+		assert.equal(event.input.command, command, "blocked no-op input is not mutated");
+	}
+});
+
+test("empty while-true/until-false loops block", async () => {
+	const cases = [
+		"while true; do :; done", "while :; do true; done", "until false; do :; done",
+		"while true; do true; done", "while /bin/true; do :; done", "until /usr/bin/false; do :; done",
+		"while true; do :; done; echo after", "while true; do while :; do :; done; done",
+	];
+	for (const command of cases) {
+		const { result } = await preflight(command);
+		assert.equal(result?.block, true, command);
+		assert.match(result.reason, /loop refused/);
+		assert.match(result.reason, /watcher or completion notification/);
+	}
+});
+
+test("real commands, redirects, assertions, background and terminating loops stay allowed", async () => {
+	const cases = [
+		"echo true", "printf '%s\\n' ':'", "true && echo ran", "true | cat",
+		"true > file", ": > file", ": ${X:=set}", "if true; then echo yes; fi",
+		"while true; do echo once; break; done", "while true; do sleep .01; break; done",
+		"while false; do :; done", "until true; do :; done",
+		"true &", "while true; do :; done &", "(while true; do :; done) &",
+		"cat <<'EOF'\nwhile true; do :; done\nEOF",
+		"bash -c 'while true; do :; done'", "sh -c 'true'",
+	];
+	for (const command of cases) {
+		const { result } = await preflight(command);
+		assert.equal(result?.block, undefined, command);
+	}
+});
+
 test("policy covers executable syntax after a heredoc without scanning its body", async () => {
 	const command = "cat <<'EOF'\nsleep 900\nEOF\nsleep 30";
 	assert.equal((await preflight(command)).result?.block, true);
