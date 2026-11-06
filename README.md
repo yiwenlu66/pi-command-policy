@@ -8,7 +8,7 @@ remind about SSH session reuse, including inside invoked child scripts.
 ## Install
 
 ```sh
-pi install git:github.com/yiwenlu66/pi-command-policy@v0.3.0
+pi install git:github.com/yiwenlu66/pi-command-policy@v0.4.0
 ```
 
 Start a new session or `/reload` after installation or upgrade: the direct-input
