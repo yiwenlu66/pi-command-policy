@@ -49,7 +49,7 @@ run_guarded() {
 	set -e
 }
 
-printf '1..31\n'
+printf '1..34\n'
 
 # 1. A normal recursive deletion is blocked and describes the absolute directory.
 protected_dir="$WORK/protected dir"
@@ -97,6 +97,20 @@ RM_GUARD_CONFIRM=1 PATH="$GUARD_PATH" bash "$nested_script"
 assert_missing "$nested_dir" 'confirmed nested script deletes through shim'
 pass 'RM_GUARD_CONFIRM=1 confirms nested rm'
 
+# A value that names this policy confirms it, directly and through a script.
+named_dir="$WORK/named-confirmed"
+mkdir -p -- "$named_dir"
+PI_COMMAND_POLICY_CONFIRM=rm PATH="$GUARD_PATH" rm -rf -- "$named_dir"
+assert_missing "$named_dir" 'PI_COMMAND_POLICY_CONFIRM=rm deletes through shim'
+named_script_dir="$WORK/named-nested-confirmed"
+mkdir -p -- "$named_script_dir"
+printf 'rm -rf %q\n' "$named_script_dir" >"$WORK/named-confirm.sh"
+run_guarded "$WORK/named.err" env PI_COMMAND_POLICY_CONFIRM=rm bash "$WORK/named-confirm.sh"
+assert_equals "$guard_status" 0 'policy-named confirmation reaches nested rm'
+assert_missing "$named_script_dir" 'policy-named confirmation deletes through child shim'
+[[ ! -s $WORK/named.err ]] || fail 'policy-named rm confirmation is silent'
+pass 'PI_COMMAND_POLICY_CONFIRM=rm confirms rm directly and in child scripts'
+
 # 6. rm -f with no operands keeps coreutils no-op semantics.
 run_guarded "$WORK/no-operands.err" rm -f
 assert_equals "$guard_status" 0 'rm -f without operands succeeds'
@@ -130,28 +144,52 @@ assert_exists "$weird_dir/$leading_name" 'weird filename remains intact'
 assert_contains "$WORK/weird.err" "$weird_dir/$leading_name" 'report resolves spaced directory and leading-dash filename'
 pass 'options and weird filenames are handled without mutation'
 
-# Global confirmation also reaches rm inside scripts.
-global_dir="$WORK/global-confirmed"
-mkdir -p -- "$global_dir"
-printf 'rm -rf %q\n' "$global_dir" >"$WORK/global-confirm.sh"
-run_guarded "$WORK/global.err" env PI_SHIMS_CONFIRM=1 bash "$WORK/global-confirm.sh"
-assert_equals "$guard_status" 0 'global bypass allows nested rm'
-assert_missing "$global_dir" 'global bypass deletes through child shim'
-[[ ! -s $WORK/global.err ]] || fail 'global rm bypass is silent'
-pass 'PI_SHIMS_CONFIRM=1 confirms nested rm'
+# The legacy blanket name and the old blanket value no longer confirm anything:
+# the report says so instead of presenting a recipe that no longer works.
+legacy_dir="$WORK/legacy-confirmed"
+mkdir -p -- "$legacy_dir"
+run_guarded "$WORK/legacy.err" env PI_SHIMS_CONFIRM=1 rm -rf -- "$legacy_dir"
+assert_equals "$guard_status" 77 'PI_SHIMS_CONFIRM=1 no longer confirms rm'
+assert_exists "$legacy_dir" 'legacy blanket leaves the target intact'
+assert_contains "$WORK/legacy.err" 'PI_COMMAND_POLICY_CONFIRM=1 / PI_SHIMS_CONFIRM no longer confirm anything: name the policy (PI_COMMAND_POLICY_CONFIRM=rm) or use /bin/rm' 'legacy name reports the migration line'
+# The legacy name counts as present even when empty: it is still the old habit.
+run_guarded "$WORK/legacy-empty.err" env PI_SHIMS_CONFIRM= rm -rf -- "$legacy_dir"
+assert_equals "$guard_status" 77 'an empty PI_SHIMS_CONFIRM still confirms nothing'
+assert_contains "$WORK/legacy-empty.err" 'no longer confirm anything' 'empty legacy name reports the migration line'
+blanket_dir="$WORK/blanket-refused"
+mkdir -p -- "$blanket_dir"
+run_guarded "$WORK/blanket.err" env PI_COMMAND_POLICY_CONFIRM=1 rm -rf -- "$blanket_dir"
+assert_equals "$guard_status" 77 'PI_COMMAND_POLICY_CONFIRM=1 no longer confirms rm'
+assert_exists "$blanket_dir" 'blanket value leaves the target intact'
+assert_contains "$WORK/blanket.err" 'no longer confirm anything' 'blanket value reports the migration line'
+pass 'the blanket value and the legacy name are refused with the migration line'
+
+# A confirmation for another policy does not confirm rm, and says how to.
+search_named_dir="$WORK/search-named"
+mkdir -p -- "$search_named_dir"
+for confirmation in search sleep:30 rm-only-nonsense; do
+	run_guarded "$WORK/cross.err" env PI_COMMAND_POLICY_CONFIRM="$confirmation" rm -rf -- "$search_named_dir"
+	assert_equals "$guard_status" 77 "PI_COMMAND_POLICY_CONFIRM=$confirmation does not confirm rm"
+	assert_exists "$search_named_dir" "$confirmation leaves the rm target intact"
+done
+assert_contains "$WORK/cross.err" 'Check the targets above before confirming. To confirm: /bin/rm (direct), PI_COMMAND_POLICY_CONFIRM=rm when a script must delete (covers child scripts), or RM_GUARD_CONFIRM=1 (rm only)' 'rm report names the current values'
+# The migration line replaces, never accompanies, the normal recipe.
+if grep -F 'Check the targets above before confirming.' "$WORK/legacy.err" >/dev/null; then fail 'legacy report must not also print the normal recipe'; fi
+if grep -F 'Check the targets above before confirming.' "$WORK/blanket.err" >/dev/null; then fail 'blanket report must not also print the normal recipe'; fi
+pass 'cross-policy values do not confirm rm and get the current recipe'
 
 node "$ROOT/tests/extension.mjs"
 pass 'real Pi extension boundary, parsed sleep policy, unrestricted child timers, and inherited guards'
 
 # A named FIFO blocks the real grep/rg file scan without making stdin a pipe.
 run_fifo_search() {
-	local command=$1 confirmation=${2:-0}
+	local command=$1 confirmation=${2-}
 	local fifo="$WORK/search.fifo"
 	/bin/rm -f -- "$fifo"
 	mkfifo -- "$fifo"
 	(printf 'needle before timeout\n'; exec /bin/sleep .3) >"$fifo" &
 	local writer=$!
-	run_guarded "$WORK/search-timeout.err" env PI_SHIMS_SEARCH_TIMEOUT=.05s PI_SHIMS_CONFIRM="$confirmation" "$command" --line-buffered needle "$fifo" </dev/null
+	run_guarded "$WORK/search-timeout.err" env PI_SHIMS_SEARCH_TIMEOUT=.05s PI_COMMAND_POLICY_CONFIRM="$confirmation" "$command" --line-buffered needle "$fifo" </dev/null
 	kill "$writer" 2>/dev/null || true
 	wait "$writer" 2>/dev/null || true
 }
@@ -162,7 +200,7 @@ for search in grep rg; do
 	assert_contains "$WORK/stdout" 'needle before timeout' "$search preserves partial output"
 	assert_contains "$WORK/search-timeout.err" 'exceeded .05s and was killed' "$search reports the killed scan"
 	assert_contains "$WORK/search-timeout.err" 'partial output' "$search marks output incomplete"
-	assert_contains "$WORK/search-timeout.err" 'PI_SHIMS_CONFIRM=1' "$search explains the bypass"
+	assert_contains "$WORK/search-timeout.err" 'To run untimed: PI_COMMAND_POLICY_CONFIRM=search, or the real binary: ' "$search explains the bypass"
 	pass "$search times out a filesystem search and preserves partial output"
 done
 
@@ -190,11 +228,20 @@ assert_contains "$WORK/fd-timeout.err" 'was killed' 'fd timeout is reported'
 pass 'fd always times filesystem scans, including with pipe stdin'
 
 for search in grep rg; do
-	run_fifo_search "$search" 1
-	assert_equals "$guard_status" 0 "global bypass lets slow $search complete"
+	run_fifo_search "$search" search
+	assert_equals "$guard_status" 0 "policy-named confirmation lets slow $search complete"
 	[[ ! -s $WORK/search-timeout.err ]] || fail "$search bypass is silent"
 done
-pass 'global confirmation runs slow searches untimed'
+pass 'PI_COMMAND_POLICY_CONFIRM=search runs slow searches untimed'
+
+# Any other confirmation leaves the search timed, including the old blanket.
+for confirmation in rm sleep:30 1; do
+	for search in grep rg; do
+		run_fifo_search "$search" "$confirmation"
+		assert_equals "$guard_status" 77 "$search stays timed under PI_COMMAND_POLICY_CONFIRM=$confirmation"
+	done
+done
+pass 'rm, sleep and blanket confirmations do not lift the search timeout'
 
 run_guarded "$WORK/search-direct.err" env PI_SHIMS_SEARCH_TIMEOUT=.001s /bin/grep needle "$search_dir/one.txt"
 assert_equals "$guard_status" 0 'absolute grep bypass works'
@@ -355,12 +402,12 @@ pass 'all six search shims skip identical copies, symlink aliases, and old and r
 
 canonical_dir="$WORK/canonical-confirmed"
 mkdir -p -- "$canonical_dir"
-run_guarded "$WORK/canonical-rm.err" env PI_COMMAND_POLICY_CONFIRM=1 rm -rf -- "$canonical_dir"
-assert_equals "$guard_status" 0 'canonical confirmation allows rm'
-assert_missing "$canonical_dir" 'canonical confirmation deletes target'
-run_guarded "$WORK/canonical-search.err" env PI_COMMAND_POLICY_CONFIRM=1 PI_COMMAND_POLICY_SEARCH_TIMEOUT=.01s find "$search_dir" -maxdepth 0 -exec /bin/sleep .03 \;
-assert_equals "$guard_status" 0 'canonical confirmation allows slow search'
-[[ ! -s $WORK/canonical-search.err ]] || fail 'canonical search confirmation is silent'
-pass 'PI_COMMAND_POLICY_CONFIRM confirms rm and search while legacy confirmations remain supported'
+run_guarded "$WORK/canonical-rm.err" env PI_COMMAND_POLICY_CONFIRM=rm rm -rf -- "$canonical_dir"
+assert_equals "$guard_status" 0 'policy-named confirmation allows rm'
+assert_missing "$canonical_dir" 'policy-named confirmation deletes target'
+run_guarded "$WORK/canonical-search.err" env PI_COMMAND_POLICY_CONFIRM=search PI_COMMAND_POLICY_SEARCH_TIMEOUT=.01s find "$search_dir" -maxdepth 0 -exec /bin/sleep .03 \;
+assert_equals "$guard_status" 0 'policy-named confirmation allows slow search'
+[[ ! -s $WORK/canonical-search.err ]] || fail 'policy-named search confirmation is silent'
+pass 'PI_COMMAND_POLICY_CONFIRM names rm or search and changes nothing else'
 
 printf '# %d tests passed\n' "$pass_count"

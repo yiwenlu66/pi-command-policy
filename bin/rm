@@ -1,8 +1,15 @@
 #!/usr/bin/env bash
 # PATH-level rm confirmation shim for pi-command-policy. It never reads stdin.
 
-if [[ ${PI_COMMAND_POLICY_CONFIRM:-} == 1 || ${PI_SHIMS_CONFIRM:-} == 1 || ${RM_GUARD_CONFIRM:-} == 1 ]]; then
+# Only a value that names this policy confirms it; the legacy blanket names no
+# policy and is reported as a migration error below.
+if [[ ${PI_COMMAND_POLICY_CONFIRM:-} == rm || ${RM_GUARD_CONFIRM:-} == 1 ]]; then
 	exec /bin/rm "$@"
+fi
+
+legacy=
+if [[ ${PI_COMMAND_POLICY_CONFIRM:-} == 1 || -n ${PI_SHIMS_CONFIRM+x} ]]; then
+	legacy=1
 fi
 
 operands=()
@@ -94,5 +101,9 @@ for operand in "${operands[@]}"; do
 	fi
 done
 
-printf '%s\n' 'to confirm: re-run with /bin/rm (direct), or PI_COMMAND_POLICY_CONFIRM=1 (covers child scripts; legacy PI_SHIMS_CONFIRM=1 and rm-only RM_GUARD_CONFIRM=1 also work)' >&2
+if [[ -n $legacy ]]; then
+	printf '%s\n' 'PI_COMMAND_POLICY_CONFIRM=1 / PI_SHIMS_CONFIRM no longer confirm anything: name the policy (PI_COMMAND_POLICY_CONFIRM=rm) or use /bin/rm' >&2
+else
+	printf '%s\n' 'Check the targets above before confirming. To confirm: /bin/rm (direct), PI_COMMAND_POLICY_CONFIRM=rm when a script must delete (covers child scripts), or RM_GUARD_CONFIRM=1 (rm only)' >&2
+fi
 exit 77

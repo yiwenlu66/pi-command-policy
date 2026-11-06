@@ -12,9 +12,11 @@ const pathExport = `export PATH="${shimDirectory}:$PATH"\n`;
 export default function (pi: ExtensionAPI) {
 	pi.on("tool_call", (event) => {
 		if (!isToolCallEventType("bash", event)) return;
-		// Sleep is checked first so its more specific message wins; the no-op
-		// policy has no confirmation bypass, so it ignores PI_COMMAND_POLICY_CONFIRM.
-		const reason = sleepPolicyReason(event.input.command) ?? noopPolicyReason(event.input.command);
+		// The no-op policy is checked first so its more specific message wins: a
+		// bare no-op has no confirmation bypass at all. Sleep comes next and owns
+		// the confirmation vocabulary, which must be read before the shim-directory
+		// early return so it cannot be skipped by mentioning that directory.
+		const reason = noopPolicyReason(event.input.command) ?? sleepPolicyReason(event.input.command);
 		if (reason) return { block: true, reason };
 		if (event.input.command.includes(shimDirectory)) return;
 
@@ -26,7 +28,7 @@ export default function (pi: ExtensionAPI) {
 		handler: async (_args, ctx) => {
 			const entries = await readdir(shimDirectory, { withFileTypes: true });
 			const shims = entries.filter((entry) => entry.isFile()).map((entry) => entry.name).sort();
-			ctx.ui.notify(`pi-command-policy active\nsleep: direct Bash input only (>= 10s); child scripts unrestricted\nno-op: bare true/: and empty while-true/until-false loops refused (no bypass)\nshim directory: ${shimDirectory}\nshims: ${shims.join(", ") || "none"}`, "info");
+			ctx.ui.notify(`pi-command-policy active\nsleep: direct Bash input only (>= 10s); child scripts unrestricted\nno-op: bare true/: and empty while-true/until-false loops refused (no bypass)\nconfirm: PI_COMMAND_POLICY_CONFIRM=rm|search|sleep:<bound>; =1 and PI_SHIMS_CONFIRM refused\nshim directory: ${shimDirectory}\nshims: ${shims.join(", ") || "none"}`, "info");
 		},
 	});
 }
