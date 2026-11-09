@@ -8,7 +8,7 @@ remind about SSH session reuse, including inside invoked child scripts.
 ## Install
 
 ```sh
-pi install git:github.com/yiwenlu66/pi-command-policy@v0.5.0
+pi install git:github.com/yiwenlu66/pi-command-policy@v0.5.1
 ```
 
 Start a new session or `/reload` after installation or upgrade: the direct-input
@@ -119,9 +119,10 @@ Background statements are exempt: `sleep 30 &`, `(sleep 30; echo done) &`, and
 statement is skipped. Later `wait` commands are not inferred, so `sleep 30 & wait`
 is also allowed even though it waits for completion.
 
-**Action:** block the entire tool call before execution with guidance to run
-long work in the background, arrange a watcher/completion notification, and keep
-advancing the task.
+**Action:** block the entire tool call before execution with guidance to run long
+work in a persistent session — tmux or similar — rather than `&`/nohup, which
+leave no session to return to and no readable output once the call ends; arrange
+a watcher/completion notification and keep advancing the task.
 
 **Child scripts run normally.** There is **no `bin/sleep`**. `bash ./worker.sh`,
 `./worker.sh`, sourced files, Makefile recipes, and other invoked programs resolve

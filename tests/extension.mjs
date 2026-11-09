@@ -58,6 +58,7 @@ test("direct and compound Bash sleeps block before execution", async () => {
 		assert.equal(result?.block, true, command);
 		assert.match(result.reason, /pi-command-policy: direct sleep refused/);
 		assert.match(result.reason, /background/);
+		assert.match(result.reason, /persistent session \(tmux or similar\), not `&`\/nohup/);
 		assert.match(result.reason, /watcher or completion notification/);
 		assert.doesNotMatch(result.reason, /pi-notify/);
 		assert.equal(event.input.command, command, "blocked tool input is not mutated");

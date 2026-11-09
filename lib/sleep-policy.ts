@@ -15,7 +15,7 @@ import {
 const longSleepSeconds = 10;
 
 const sleepReason = "pi-command-policy: direct sleep refused (total >= 10s). Waiting is not progress, and polling a job you started is not a reason to hold the turn.\n"
-	+ "Do not escape this unless the next action genuinely depends on the result and the work cannot be backgrounded. Background it (tmux/nohup/&), arm a watcher or completion notification, and take the next real step.\n"
+	+ "Do not escape this unless the next action genuinely depends on the result and the work cannot be backgrounded. Run it in a persistent session (tmux or similar), not `&`/nohup, which leave nothing to return to; arm a watcher or completion notification, and take the next real step.\n"
 	+ "If the wait is unavoidable, state the bound you accept on this command: PI_COMMAND_POLICY_CONFIRM=sleep:30s. /bin/sleep stays unconditional; child scripts are never inspected.";
 
 /** A command's literal sleep total in seconds, `Infinity` for a GNU `inf`.
