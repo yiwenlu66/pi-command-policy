@@ -28,7 +28,7 @@ export default function (pi: ExtensionAPI) {
 		handler: async (_args, ctx) => {
 			const entries = await readdir(shimDirectory, { withFileTypes: true });
 			const shims = entries.filter((entry) => entry.isFile()).map((entry) => entry.name).sort();
-			ctx.ui.notify(`pi-command-policy active\nsleep: direct Bash input only (>= 10s); child scripts unrestricted\nno-op: bare true/: and empty while-true/until-false loops refused (no bypass)\nconfirm: PI_COMMAND_POLICY_CONFIRM=rm|search|sleep:<bound>; =1 and PI_SHIMS_CONFIRM refused\nshim directory: ${shimDirectory}\nshims: ${shims.join(", ") || "none"}`, "info");
+			ctx.ui.notify(`pi-command-policy active\nsleep: direct Bash input only (>= 10s); child scripts unrestricted\nno-op: bare true/: and empty while-true/until-false loops refused (no bypass)\nconfirm: PI_COMMAND_POLICY_CONFIRM=rm|search|sleep; =1, PI_SHIMS_CONFIRM and bounds refused\nshim directory: ${shimDirectory}\nshims: ${shims.join(", ") || "none"}`, "info");
 		},
 	});
 }

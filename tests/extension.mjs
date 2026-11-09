@@ -91,7 +91,7 @@ test("bare no-op commands block with guidance and no confirmation bypass", async
 		": ;", "true\ntrue", "FOO=bar true",
 		// A no-op is never a deliberate policy decision, so its specific reason
 		// outranks the confirmation vocabulary on the same command.
-		"PI_COMMAND_POLICY_CONFIRM=1 true", "PI_SHIMS_CONFIRM=1 :", "PI_COMMAND_POLICY_CONFIRM=sleep:900 true",
+		"PI_COMMAND_POLICY_CONFIRM=1 true", "PI_SHIMS_CONFIRM=1 :", "PI_COMMAND_POLICY_CONFIRM=sleep true",
 	];
 	for (const command of cases) {
 		const { event, result } = await preflight(command);
@@ -139,53 +139,44 @@ test("policy covers executable syntax after a heredoc without scanning its body"
 	assert.equal((await preflight(command)).result?.block, true);
 });
 
-test("sleep:<bound> confirms a wait only when the bound covers this command's total", async () => {
-	const cases = [
-		"PI_COMMAND_POLICY_CONFIRM=sleep:900 sleep 900",
-		"PI_COMMAND_POLICY_CONFIRM=sleep:1.5m sleep 90",
-		"PI_COMMAND_POLICY_CONFIRM=sleep:30 sleep 30",
-		"PI_COMMAND_POLICY_CONFIRM=sleep:2m sleep 90",
-		"PI_COMMAND_POLICY_CONFIRM=sleep:10 sleep 6 4",
-		"PI_COMMAND_POLICY_CONFIRM=sleep:900 sleep -- 900",
-		"PI_COMMAND_POLICY_CONFIRM='sleep:30' sleep 30",
-		'PI_COMMAND_POLICY_CONFIRM="sleep:30" sleep 30',
-	];
-	for (const command of cases) {
+test("PI_COMMAND_POLICY_CONFIRM=sleep confirms a direct long wait on its own command", async () => {
+	for (const command of [
+		"PI_COMMAND_POLICY_CONFIRM=sleep sleep 900",
+		"PI_COMMAND_POLICY_CONFIRM=sleep sleep 30",
+		"PI_COMMAND_POLICY_CONFIRM=sleep sleep inf",
+		"PI_COMMAND_POLICY_CONFIRM='sleep' sleep 60",
+		'PI_COMMAND_POLICY_CONFIRM="sleep" sleep 60',
+	]) {
 		const { result } = await preflight(command);
 		assert.equal(result?.block, undefined, command);
 	}
-	// A covered wait is still per command: the second timer has no bound.
-	assert.match((await preflight("PI_COMMAND_POLICY_CONFIRM=sleep:30 sleep 30; sleep 900")).result.reason,
+	// The confirmation is per command, like every other part of this policy.
+	assert.match((await preflight("PI_COMMAND_POLICY_CONFIRM=sleep sleep 30; sleep 900")).result.reason,
 		/pi-command-policy: direct sleep refused/);
 });
 
-test("the blanket value and the legacy name are refused whatever follows them", async () => {
+test("the blanket value, the legacy name and any other value are refused whatever follows", async () => {
 	const cases = [
 		"PI_COMMAND_POLICY_CONFIRM=1 sleep 900",
 		"PI_COMMAND_POLICY_CONFIRM=1 rm -rf x",
 		"PI_COMMAND_POLICY_CONFIRM=1 ls",
 		"PI_COMMAND_POLICY_CONFIRM=1",
 		"PI_COMMAND_POLICY_CONFIRM=1 bash ./cleanup.sh",
+		"PI_COMMAND_POLICY_CONFIRM=1 /bin/sleep 4",
 		"PI_COMMAND_POLICY_CONFIRM= sleep 900",
 		"PI_COMMAND_POLICY_CONFIRM= ls",
 		"PI_COMMAND_POLICY_CONFIRM=yes ls",
 		"PI_COMMAND_POLICY_CONFIRM=0 ls",
 		"PI_COMMAND_POLICY_CONFIRM=RM ls",
+		// A stated bound is not a policy either: nothing checks the number.
+		"PI_COMMAND_POLICY_CONFIRM=sleep:30 sleep 30",
+		"PI_COMMAND_POLICY_CONFIRM=sleep: sleep 900",
+		"PI_COMMAND_POLICY_CONFIRM=sleep:x sleep 900",
 		"PI_SHIMS_CONFIRM=1 sleep 900",
 		"PI_SHIMS_CONFIRM=1 bash ./cleanup.sh",
 		"PI_SHIMS_CONFIRM=0 rm -f x",
 		"PI_SHIMS_CONFIRM= ls",
-		// The same ritual written as an export, and non-plain assignments, are
-		// equally unreadable as a policy decision.
-		"export PI_COMMAND_POLICY_CONFIRM=1; rm -rf x",
-		"export PI_SHIMS_CONFIRM=1",
-		"export PI_SHIMS_CONFIRM=",
-		// Quoting moves the assignment into an export argument word.
-		'export "PI_COMMAND_POLICY_CONFIRM=1"; rm -rf x',
-		"export 'PI_SHIMS_CONFIRM=1'",
-		'export "PI_COMMAND_POLICY_CONFIRM+=1"',
 		"PI_COMMAND_POLICY_CONFIRM+=1 ls",
-		"export PI_COMMAND_POLICY_CONFIRM+=1",
 		"PI_COMMAND_POLICY_CONFIRM[0]=1 ls",
 		// The vocabulary check precedes the shim-directory early return.
 		`echo '${shimDirectory}'; PI_COMMAND_POLICY_CONFIRM=1 ls`,
@@ -193,84 +184,54 @@ test("the blanket value and the legacy name are refused whatever follows them", 
 	for (const command of cases) {
 		const { event, result } = await preflight(command);
 		assert.equal(result?.block, true, command);
-		assert.match(result.reason, /PI_COMMAND_POLICY_CONFIRM=1 and PI_SHIMS_CONFIRM are refused/, command);
-		assert.match(result.reason, /Name the policy you are confirming: PI_COMMAND_POLICY_CONFIRM=rm, PI_COMMAND_POLICY_CONFIRM=search, or PI_COMMAND_POLICY_CONFIRM=sleep:<bound> \(e\.g\. sleep:30s\)/);
+		assert.match(result.reason, /PI_COMMAND_POLICY_CONFIRM must be exactly rm, search, or sleep/, command);
+		assert.match(result.reason, /PI_COMMAND_POLICY_CONFIRM=1 and PI_SHIMS_CONFIRM switched off every guard at once/);
 		assert.match(result.reason, /The narrow escapes still work: \/bin\/sleep and \/bin\/rm\. Confirm only when the wait or the deletion is genuinely unavoidable/);
 		assert.equal(event.input.command, command, "blocked blanket input is not mutated");
 	}
 });
 
-test("a sleep confirmation without a usable bound is refused as unbound", async () => {
-	const cases = [
-		"PI_COMMAND_POLICY_CONFIRM=sleep sleep 900",
-		"PI_COMMAND_POLICY_CONFIRM=sleep ls",
-		"PI_COMMAND_POLICY_CONFIRM=sleep: sleep 900",
-		"PI_COMMAND_POLICY_CONFIRM=sleep:x sleep 900",
-		"PI_COMMAND_POLICY_CONFIRM=sleep:30x sleep 900",
-		"PI_COMMAND_POLICY_CONFIRM=sleep:30. sleep 900",
-		"PI_COMMAND_POLICY_CONFIRM=sleep:+30 sleep 900",
-		"PI_COMMAND_POLICY_CONFIRM=sleep:-30 ls",
-		"PI_COMMAND_POLICY_CONFIRM=sleep:1.5.5 sleep 900",
-	];
-	for (const command of cases) {
-		const { result } = await preflight(command);
-		assert.equal(result?.block, true, command);
-		assert.match(result.reason, /PI_COMMAND_POLICY_CONFIRM=sleep needs the wait you are accepting, e\.g\. sleep:30s/, command);
-		assert.match(result.reason, /A confirmation without a bound confirms nothing checkable: do not re-add it to get past this message/);
-		assert.match(result.reason, /Run the work in the background instead; use \/bin\/sleep only when the wait is genuinely unavoidable/);
-	}
-});
-
-test("a bound below the command's own total is refused quoting both numbers", async () => {
-	const cases = [
-		["PI_COMMAND_POLICY_CONFIRM=sleep:30 sleep 60", "sleep:30 is below this command's 60s of sleeping"],
-		["PI_COMMAND_POLICY_CONFIRM=sleep:9 sleep 6 4", "sleep:9 is below this command's 10s of sleeping"],
-		["PI_COMMAND_POLICY_CONFIRM=sleep:0.1m sleep 6 4", "sleep:6 is below this command's 10s of sleeping"],
-		["PI_COMMAND_POLICY_CONFIRM=sleep:899 sleep 900", "sleep:899 is below this command's 900s of sleeping"],
-	];
-	for (const [command, quoted] of cases) {
-		const { result } = await preflight(command);
-		assert.equal(result?.block, true, command);
-		assert.ok(result.reason.includes(`pi-command-policy: PI_COMMAND_POLICY_CONFIRM=${quoted}.`), result.reason);
-		assert.match(result.reason, /Do not raise the bound to clear this message\. Drop the timer and run the work in the background; raise the bound only when the full wait is genuinely unavoidable/);
-	}
-});
-
 test("a sleep confirmation on a command the policy cannot refuse is inert", async () => {
 	const cases = [
-		"PI_COMMAND_POLICY_CONFIRM=sleep:30 sleep 8",
-		"PI_COMMAND_POLICY_CONFIRM=sleep:30 /bin/sleep 4",
-		"PI_COMMAND_POLICY_CONFIRM=sleep:30 bash ./worker.sh",
-		"PI_COMMAND_POLICY_CONFIRM=sleep:30 ls",
-		"PI_COMMAND_POLICY_CONFIRM=sleep:900 echo ready",
-		"PI_COMMAND_POLICY_CONFIRM=sleep:30 sleep 900 invalid",
-		"PI_COMMAND_POLICY_CONFIRM=sleep:30 make && sleep 900",
+		"PI_COMMAND_POLICY_CONFIRM=sleep sleep 8",
+		"PI_COMMAND_POLICY_CONFIRM=sleep /bin/sleep 4",
+		"PI_COMMAND_POLICY_CONFIRM=sleep bash ./worker.sh",
+		"PI_COMMAND_POLICY_CONFIRM=sleep ls",
+		"PI_COMMAND_POLICY_CONFIRM=sleep echo ready",
+		"PI_COMMAND_POLICY_CONFIRM=sleep sleep 900 invalid",
+		"PI_COMMAND_POLICY_CONFIRM=sleep make && sleep 8",
 	];
 	for (const command of cases) {
 		const { result } = await preflight(command);
 		assert.equal(result?.block, true, command);
-		assert.match(result.reason, /nothing on this assignment's command can trigger the sleep policy, so PI_COMMAND_POLICY_CONFIRM=sleep:<bound> confirms nothing/, command);
+		assert.match(result.reason, /nothing on this assignment's command can trigger the sleep policy, so PI_COMMAND_POLICY_CONFIRM=sleep confirms nothing/, command);
 		assert.match(result.reason, /Drop the assignment: child scripts are never inspected, and \/bin\/sleep is already unconditional/);
 	}
+	// A backgrounded statement is pruned before the confirmation is inspected, so a
+	// confirmation on one is simply never read: the timer returns promptly anyway.
+	assert.equal((await preflight("PI_COMMAND_POLICY_CONFIRM=sleep sleep 30 &")).result?.block, undefined);
 });
 
-test("a sleep confirmation cannot be exported; the bound belongs on the waiting command", async () => {
-	// The sleep policy reads the assignment on the command that waits, never the
-	// environment, so the refusal must say that instead of claiming the script has
-	// nothing to refuse: `export ...=sleep:900; sleep 900` does wait.
-	const cases = [
-		"export PI_COMMAND_POLICY_CONFIRM=sleep",
-		"export PI_COMMAND_POLICY_CONFIRM=sleep:30",
-		"export PI_COMMAND_POLICY_CONFIRM=sleep:900; sleep 900",
-		"export PI_COMMAND_POLICY_CONFIRM=sleep:30 bash ./worker.sh",
-		'export "PI_COMMAND_POLICY_CONFIRM=sleep:30"',
-	];
-	for (const command of cases) {
+test("an export is unreadable as a decision; the shims read it from the environment", async () => {
+	// The extension parses assignments that precede a command and never emulates
+	// shell state, so an export is neither confirmed nor refused here: the rm and
+	// search shims still read it from the environment of the process they run in,
+	// and the sleep policy never consults the environment at all.
+	for (const command of [
+		"export PI_COMMAND_POLICY_CONFIRM=rm",
+		"export PI_COMMAND_POLICY_CONFIRM=search",
+		'export "PI_COMMAND_POLICY_CONFIRM=rm"',
+		"export PI_COMMAND_POLICY_CONFIRM=1; rm -rf x",
+		"export PI_SHIMS_CONFIRM=1",
+		"export PI_COMMAND_POLICY_CONFIRM=sleep; sleep 900",
+	]) {
 		const { result } = await preflight(command);
-		assert.equal(result?.block, true, command);
-		assert.match(result.reason, /PI_COMMAND_POLICY_CONFIRM=sleep:<bound> cannot be exported/, command);
-		assert.match(result.reason, /Put it on the waiting command itself \(PI_COMMAND_POLICY_CONFIRM=sleep:900 sleep 900\), or drop it and background the work/);
+		// Only a long sleep that no prefix covers is refused: the export itself is
+		// outside this policy's vocabulary.
+		assert.equal(result?.block, command.includes("sleep 900") ? true : undefined, command);
 	}
+	assert.match((await preflight("export PI_COMMAND_POLICY_CONFIRM=sleep; sleep 900")).result.reason,
+		/pi-command-policy: direct sleep refused/);
 });
 
 test("policy-named values pass the extension and never confirm another policy", async () => {
@@ -289,7 +250,7 @@ test("policy-named values pass the extension and never confirm another policy", 
 
 test("inherited confirmation values no longer confirm; notify marker never bypasses", async () => {
 	for (const name of ["PI_COMMAND_POLICY_CONFIRM", "PI_SHIMS_CONFIRM", "RM_GUARD_CONFIRM"]) {
-		for (const value of ["1", "sleep:900", "rm", "search", ""]) {
+		for (const value of ["1", "sleep", "rm", "search", ""]) {
 			try {
 				process.env[name] = value;
 				const { result } = await preflight("sleep 900");
@@ -301,8 +262,8 @@ test("inherited confirmation values no longer confirm; notify marker never bypas
 		}
 	}
 	try {
-		process.env.PI_COMMAND_POLICY_CONFIRM = "sleep:900";
-		assert.match((await preflight("PI_COMMAND_POLICY_CONFIRM=1 ls")).result.reason, /PI_COMMAND_POLICY_CONFIRM=1 and PI_SHIMS_CONFIRM are refused/);
+		process.env.PI_COMMAND_POLICY_CONFIRM = "sleep";
+		assert.match((await preflight("PI_COMMAND_POLICY_CONFIRM=1 ls")).result.reason, /PI_COMMAND_POLICY_CONFIRM must be exactly rm, search, or sleep/);
 	} finally { delete process.env.PI_COMMAND_POLICY_CONFIRM; }
 	try {
 		process.env.PI_NOTIFY_BACKGROUND = "1";
@@ -324,7 +285,7 @@ test("PATH injection remains idempotent; other tools unchanged; renamed status l
 	runner.setUIContext({ notify: (message) => { notification = message; } }, "tui");
 	await runner.getCommand("command-policy").handler("", runner.createCommandContext());
 	assert.match(notification, /sleep: direct Bash input only/);
-	assert.match(notification, /confirm: PI_COMMAND_POLICY_CONFIRM=rm\|search\|sleep:<bound>; =1 and PI_SHIMS_CONFIRM refused/);
+	assert.match(notification, /confirm: PI_COMMAND_POLICY_CONFIRM=rm\|search\|sleep; =1, PI_SHIMS_CONFIRM and bounds refused/);
 	assert.ok(notification.includes(`shim directory: ${shimDirectory}`));
 	const files = (await readdir(shimDirectory)).sort();
 	assert.equal(files.includes("sleep"), false);

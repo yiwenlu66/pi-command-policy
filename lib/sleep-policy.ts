@@ -1,22 +1,18 @@
 import { forEachChild, parse, type Assignment, type Command, type SyntaxNode } from "unbash";
 import { literal } from "./shell-words.ts";
 import {
-	blanketReason,
-	boundTooSmallReason,
 	confirmationName,
-	exportSleepReason,
 	inertReason,
 	legacyConfirmationName,
-	parseAssignmentWord,
 	parseConfirmation,
-	unboundReason,
+	valueReason,
 } from "./confirmation.ts";
 
 const longSleepSeconds = 10;
 
 const sleepReason = "pi-command-policy: direct sleep refused (total >= 10s). Waiting is not progress, and polling a job you started is not a reason to hold the turn.\n"
 	+ "Do not escape this unless the next action genuinely depends on the result and the work cannot be backgrounded. Run it in a persistent session (tmux or similar), not `&`/nohup, which leave nothing to return to; arm a watcher or completion notification, and take the next real step.\n"
-	+ "If the wait is unavoidable, state the bound you accept on this command: PI_COMMAND_POLICY_CONFIRM=sleep:30s. /bin/sleep stays unconditional; child scripts are never inspected.";
+	+ "If the wait is unavoidable, confirm it on this command: PI_COMMAND_POLICY_CONFIRM=sleep. /bin/sleep stays unconditional; child scripts are never inspected.";
 
 /** A command's literal sleep total in seconds, `Infinity` for a GNU `inf`.
  * Undefined when the command is not a literal sleep invocation: a different name
@@ -51,57 +47,29 @@ function literalTotal(command: Command): number | undefined {
 	return infinite ? Infinity : total;
 }
 
-/** Confirmation assignments on this command: its own prefix plus `export`
- * arguments, which set the same variables for the rest of the call. Appends and
- * indexed assignments name no policy and are reported invalid. */
-function* confirmationAssignments(command: Command): Generator<{ name: string; value: string | undefined; invalid: boolean; exported: boolean }> {
-	const inspect = (node: Assignment) => ({ name: node.name, value: literal(node.value), invalid: Boolean(node.append || node.index), exported: literal(command.name) === "export" });
-	for (const node of command.prefix) {
-		if (node.type === "Assignment") yield inspect(node);
-	}
-	if (literal(command.name) === "export") {
-		for (const node of command.args) {
-			if (node.type === "Assignment") {
-				yield inspect(node);
-				continue;
-			}
-			// `export "NAME=value"` reaches the parser as a word, not an assignment.
-			const text = node.type === "Word" ? literal(node) : undefined;
-			const word = text === undefined ? undefined : parseAssignmentWord(text);
-			if (word) yield { ...word, exported: true };
-		}
-	}
-}
-
 /** Why this command's confirmation assignment is refused, or undefined when it
- * names a policy this command may use. A `sleep:<bound>` confirms only the wait
- * authored on the command that carries it, so it is inert on any command the
- * sleep policy cannot refuse. The environment is deliberately not consulted: a
- * standing value says nothing about input this policy never inspected. */
+ * names a policy this command may use. Only the command's own prefix is read: the
+ * extension does not emulate shell state, and a `sleep` confirmation confirms only
+ * a wait authored on the command that carries it, so it is inert anywhere the
+ * sleep policy cannot refuse. The environment is deliberately not consulted. */
 function commandReason(command: Command): string | undefined {
 	const total = literalTotal(command);
 	let value: string | undefined;
-	let exported = false;
-	for (const assignment of confirmationAssignments(command)) {
-		// The legacy name and every non-plain assignment are refused wherever they
+	for (const node of command.prefix) {
+		if (node.type !== "Assignment") continue;
+		// The legacy name and any non-plain assignment are refused wherever they
 		// appear, whatever the command that follows.
-		if (assignment.name === legacyConfirmationName || assignment.invalid) return blanketReason;
-		if (assignment.name === confirmationName) {
-			value = assignment.value;
-			exported = assignment.exported;
-		}
+		if (node.name === legacyConfirmationName || node.append || node.index) return valueReason;
+		if (node.name === confirmationName) value = literal(node.value);
 	}
 	let confirmed = false;
 	// An unreadable value (an expansion) confirms nothing; the sleep check below
 	// then refuses a long wait, and a command the policy cannot refuse is left alone.
 	if (value !== undefined) {
 		const parsed = parseConfirmation(value);
-		if (!parsed) return blanketReason;
+		if (!parsed) return valueReason;
 		if (parsed.policy === "sleep") {
-			if (exported) return exportSleepReason;
-			if (parsed.bound === null) return unboundReason;
 			if (total === undefined || total < longSleepSeconds) return inertReason;
-			if (total > parsed.bound) return boundTooSmallReason(parsed.bound, total);
 			confirmed = true;
 		}
 	}

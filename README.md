@@ -8,7 +8,7 @@ remind about SSH session reuse, including inside invoked child scripts.
 ## Install
 
 ```sh
-pi install git:github.com/yiwenlu66/pi-command-policy@v0.5.1
+pi install git:github.com/yiwenlu66/pi-command-policy@v0.6.0
 ```
 
 Start a new session or `/reload` after installation or upgrade: the direct-input
@@ -42,32 +42,23 @@ directory never skips a policy. PATH injection leaves commands already containin
 the shim directory unchanged, retaining the previous injection behavior.
 
 `PI_COMMAND_POLICY_CONFIRM` names the policy it confirms: `rm`, `search`, or
-`sleep:<bound>`. The value is a decision, not a switch. `=1`, an empty value,
-unknown text, and the legacy name `PI_SHIMS_CONFIRM` (any value) are refused
-wherever they appear in direct input, including as an `export` or as a bare
-assignment, because a blanket value says nothing about which guard the caller
-meant. `RM_GUARD_CONFIRM=1` still confirms rm alone.
+`sleep`. The value is a decision, not a switch. `=1`, an empty value, unknown text
+— including a stated bound such as `sleep:30` — and the legacy name
+`PI_SHIMS_CONFIRM` (any value) are refused wherever they appear in direct input,
+because none of them names the guard the caller meant. `RM_GUARD_CONFIRM=1` still
+confirms rm alone.
 
-For the sleep policy, a value exported before Pi started confirms nothing: that
-policy inspects only input authored in the same call, so a standing value would
-accept timers nobody named — the bulk defeat this vocabulary replaces. A
-per-command assignment, or a prefix on a script invocation, covers the intended
-scope instead:
+A prefix on a script invocation carries the confirmation to its children:
 
 ```sh
 PI_COMMAND_POLICY_CONFIRM=rm bash ./intentional-operation.sh
 ```
 
-`export PI_COMMAND_POLICY_CONFIRM=rm` and `export PI_COMMAND_POLICY_CONFIRM=search`
-are allowed: they scope a shim confirmation to the rest of the call and to its
-children. `export PI_COMMAND_POLICY_CONFIRM=sleep:30` is refused as inert, since
-nothing inherits a sleep bound.
-
 Every refusal states the prohibition, not just the routes: confirm only when the
 wait or the deletion is genuinely unavoidable and the work cannot be backgrounded.
 A value offered to clear a message rather than to name a decision — the blanket
-`=1`, a `sleep:` with no bound, a bound below the command's total, or a sleep
-confirmation on a command the policy cannot refuse — is refused on its own terms.
+`=1`, a bound, or a sleep confirmation on a command the policy cannot refuse — is
+refused on its own terms.
 
 Shim logic never reads stdin or prompts interactively; delegated commands retain
 their normal I/O. Sleep uses Pi's blocking event result rather than a shell exit
@@ -88,7 +79,7 @@ inherit it; the rm-only value covers rm wherever it runs. The report lists the
 resolved targets first, and the recipe underneath is conditional on having read
 them: confirm only when the deletion is genuinely intended. A confirmation for
 another policy does not confirm rm: `PI_COMMAND_POLICY_CONFIRM=search` and
-`=sleep:<bound>` fall through to the report. The legacy `PI_SHIMS_CONFIRM` and
+`=sleep` fall through to the report. The legacy `PI_SHIMS_CONFIRM` and
 the blanket `PI_COMMAND_POLICY_CONFIRM=1` confirm nothing and replace the report's
 recipe with a migration line naming `PI_COMMAND_POLICY_CONFIRM=rm`.
 
@@ -132,28 +123,28 @@ command strings, and other opaque program arguments are not parsed as shell code
 `PI_NOTIFY_BACKGROUND` is neither required nor honored by this package.
 
 **Deliberate waits:** `/bin/sleep 900`, or
-`PI_COMMAND_POLICY_CONFIRM=sleep:900 sleep 900`. The bound is the wait the caller
-accepts, stated on the command that waits: the prefix must sit on that command and
-cover its literal total, so `sleep:1.5m` covers `sleep 90` and `sleep:30` does
-not. A bare `=sleep`, a `sleep:` with no bound, and any bound outside
-`\d+(\.\d+)?[smhd]?` are refused. A bound below the command's total is refused
-quoting both numbers. A `sleep:<bound>` on a command the sleep policy cannot
-refuse — `sleep 8`, `/bin/sleep 4`, `bash ./worker.sh` — is refused as inert: it
-confirms nothing checkable, and the habit is the thing being interrupted. The
-bound is a decision about a wait that cannot be backgrounded; a bound stated only
-to clear the refusal is the behavior this vocabulary exists to interrupt.
+`PI_COMMAND_POLICY_CONFIRM=sleep sleep 900`. The confirmation is read from the
+prefix of the command that waits and from nowhere else, so `sleep 30 ;
+PI_COMMAND_POLICY_CONFIRM=sleep sleep 900` still refuses the first timer — the
+policy stays per command. `PI_COMMAND_POLICY_CONFIRM=sleep` on a command the
+sleep policy cannot refuse — `sleep 8`, `/bin/sleep 4`, `bash ./worker.sh` — is
+refused as inert: it confirms nothing, and the habit is the thing being
+interrupted. Background statements are pruned before inspection, so a
+confirmation on one is never read; the timer returns promptly either way. A stated bound is
+refused too; nothing would check the number, so it is a wait nobody verified.
 
 Inherited confirmation is not honored. The policy inspects the source of this one
 call, so a value exported before Pi started would accept a timer nobody named
 here; `process.env` is ignored rather than refused, and a long sleep under an
-exported value is refused by the generic rule.
+exported value is refused by the generic rule. The extension reads prefixes only:
+it does not emulate shell state from an earlier `export`, assignment, alias or
+function, which is why an export is neither confirmed nor refused there. The PATH
+shims do read their value from the environment of the process they run in, so
+`export PI_COMMAND_POLICY_CONFIRM=rm` still reaches the rm calls of a script.
 
-The parser reads confirmation assignments on the command they precede. It does
-not carry a value forward from an earlier `export` or assignment: there is no
-emulation of shell state from prior commands, aliases, or functions. Wrappers
-such as `env sleep 900` or `command sleep 900` are outside the named-command
-check. A confirmation that names `rm` or `search` confirms no sleep:
-`PI_COMMAND_POLICY_CONFIRM=rm sleep 900` is refused.
+Wrappers such as `env sleep 900` or `command sleep 900` are outside the
+named-command check. A confirmation that names `rm` or `search` confirms no
+sleep: `PI_COMMAND_POLICY_CONFIRM=rm sleep 900` is refused.
 
 **Uncertainty allows execution:** unresolved parameters, arithmetic, globs, or
 other dynamic operands, unrecognized sleep options/durations, and parse errors
@@ -304,14 +295,30 @@ input and reported as a migration error by `bin/rm`. Replace them by policy:
 |---|---|
 | `PI_COMMAND_POLICY_CONFIRM=1 rm -rf build` | `PI_COMMAND_POLICY_CONFIRM=rm rm -rf build` |
 | `PI_COMMAND_POLICY_CONFIRM=1 grep ...` | `PI_COMMAND_POLICY_CONFIRM=search grep ...` |
-| `PI_COMMAND_POLICY_CONFIRM=1 sleep 900` | `PI_COMMAND_POLICY_CONFIRM=sleep:900 sleep 900` |
+| `PI_COMMAND_POLICY_CONFIRM=1 sleep 900` | `PI_COMMAND_POLICY_CONFIRM=sleep sleep 900` |
 | `PI_SHIMS_CONFIRM=1` wrapping a cleanup script | `PI_COMMAND_POLICY_CONFIRM=rm` wrapping it, or `/bin/rm` |
 
 `RM_GUARD_CONFIRM=1` still confirms rm alone and needs no change. Child-script
 coverage now requires the policy-named value: `PI_COMMAND_POLICY_CONFIRM=rm bash
 ./cleanup.sh` is inherited by the `rm` calls inside the script, and the same holds
-for `=search`. A sleep bound is never inherited, because the extension reads only
-the source of the call that carries it.
+for `=search`. A sleep confirmation is never inherited, because the extension
+reads only the source of the call that carries it.
+
+### v0.6.0 — no bounds
+
+`sleep:<bound>` is gone. Nothing checked the number, so a bound stated to clear a
+message was indistinguishable from one that described a real wait, and it cost
+three refusal variants to police. `PI_COMMAND_POLICY_CONFIRM=sleep` confirms the
+wait on its own command, and the wording of the refusal carries the decision
+instead: do not escape unless the next action depends on the result and the work
+cannot be backgrounded. Earlier `sleep:<bound>` values are now refused as unknown
+text; replace them with `sleep`.
+
+The extension also stops reading `export` lines. It parses prefixes only, matching
+what it has always documented about not emulating shell state; the shims still
+read their value from the environment, so `export PI_COMMAND_POLICY_CONFIRM=rm`
+keeps working for child scripts, and an exported blanket value still refuses at
+the shim.
 
 Exported values no longer confirm the sleep policy: a long sleep under one is
 refused. Remove any standing export from the shell or service that starts Pi; a
